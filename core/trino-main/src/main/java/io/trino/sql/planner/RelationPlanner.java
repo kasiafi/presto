@@ -16,11 +16,13 @@ package io.trino.sql.planner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableListMultimap;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ListMultimap;
 import io.trino.Session;
 import io.trino.metadata.Metadata;
 import io.trino.metadata.TableHandle;
 import io.trino.spi.connector.ColumnHandle;
+import io.trino.spi.connector.SortOrder;
 import io.trino.spi.type.RowType;
 import io.trino.spi.type.Type;
 import io.trino.sql.ExpressionUtils;
@@ -36,6 +38,8 @@ import io.trino.sql.planner.plan.ExceptNode;
 import io.trino.sql.planner.plan.FilterNode;
 import io.trino.sql.planner.plan.IntersectNode;
 import io.trino.sql.planner.plan.JoinNode;
+import io.trino.sql.planner.plan.PatternRecognitionNode;
+import io.trino.sql.planner.plan.PatternRecognitionNode.Measure;
 import io.trino.sql.planner.plan.PlanNode;
 import io.trino.sql.planner.plan.ProjectNode;
 import io.trino.sql.planner.plan.SampleNode;
@@ -43,6 +47,7 @@ import io.trino.sql.planner.plan.TableScanNode;
 import io.trino.sql.planner.plan.UnionNode;
 import io.trino.sql.planner.plan.UnnestNode;
 import io.trino.sql.planner.plan.ValuesNode;
+import io.trino.sql.planner.plan.WindowNode;
 import io.trino.sql.tree.AliasedRelation;
 import io.trino.sql.tree.AstVisitor;
 import io.trino.sql.tree.Cast;
@@ -55,24 +60,36 @@ import io.trino.sql.tree.Intersect;
 import io.trino.sql.tree.Join;
 import io.trino.sql.tree.JoinCriteria;
 import io.trino.sql.tree.JoinUsing;
+import io.trino.sql.tree.Label;
 import io.trino.sql.tree.LambdaArgumentDeclaration;
 import io.trino.sql.tree.Lateral;
+import io.trino.sql.tree.MeasureDefinition;
 import io.trino.sql.tree.NaturalJoin;
 import io.trino.sql.tree.Node;
 import io.trino.sql.tree.NodeRef;
+import io.trino.sql.tree.PatternLabel;
+import io.trino.sql.tree.PatternRecognitionRelation;
+import io.trino.sql.tree.PatternVariable;
 import io.trino.sql.tree.QualifiedName;
 import io.trino.sql.tree.Query;
 import io.trino.sql.tree.QuerySpecification;
 import io.trino.sql.tree.Relation;
 import io.trino.sql.tree.Row;
+import io.trino.sql.tree.RowPattern;
+import io.trino.sql.tree.RowPatternRewriter;
+import io.trino.sql.tree.RowPatternTreeRewriter;
 import io.trino.sql.tree.SampledRelation;
 import io.trino.sql.tree.SetOperation;
+import io.trino.sql.tree.SkipTo;
+import io.trino.sql.tree.SortItem;
 import io.trino.sql.tree.SubqueryExpression;
+import io.trino.sql.tree.SubsetDefinition;
 import io.trino.sql.tree.Table;
 import io.trino.sql.tree.TableSubquery;
 import io.trino.sql.tree.Union;
 import io.trino.sql.tree.Unnest;
 import io.trino.sql.tree.Values;
+import io.trino.sql.tree.VariableDefinition;
 import io.trino.type.TypeCoercion;
 
 import java.util.ArrayList;
@@ -87,10 +104,13 @@ import java.util.function.Function;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.ImmutableMap.toImmutableMap;
+import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
+import static io.trino.sql.NodeUtils.getSortItemsFromOrderBy;
 import static io.trino.sql.analyzer.SemanticExceptions.semanticException;
 import static io.trino.sql.analyzer.TypeSignatureTranslator.toSqlType;
+import static io.trino.sql.planner.OrderingScheme.sortItemToSortOrder;
 import static io.trino.sql.planner.PlanBuilder.newPlanBuilder;
 import static io.trino.sql.planner.QueryPlanner.coerce;
 import static io.trino.sql.planner.QueryPlanner.coerceIfNecessary;
@@ -100,6 +120,11 @@ import static io.trino.sql.tree.BooleanLiteral.TRUE_LITERAL;
 import static io.trino.sql.tree.Join.Type.CROSS;
 import static io.trino.sql.tree.Join.Type.IMPLICIT;
 import static io.trino.sql.tree.Join.Type.INNER;
+import static io.trino.sql.tree.PatternRecognitionRelation.RowsPerMatch.ONE;
+import static io.trino.sql.tree.RowPatternTreeRewriter.rewriteWith;
+import static io.trino.sql.tree.SkipTo.Position.PAST_LAST;
+import static java.lang.Boolean.TRUE;
+import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
 
 class RelationPlanner
@@ -296,6 +321,115 @@ class RelationPlanner
         }
 
         return new RelationPlan(root, analysis.getScope(node), mappings, outerContext);
+    }
+
+    @Override
+    protected RelationPlan visitPatternRecognitionRelation(PatternRecognitionRelation node, Void context)
+    {
+        RelationPlan subPlan = process(node.getInput(), context);
+
+        // Pre-project inputs for PARTITION BY and ORDER BY
+        List<Expression> inputs = ImmutableList.<Expression>builder()
+                .addAll(node.getPartitionBy())
+                .addAll(getSortItemsFromOrderBy(node.getOrderBy()).stream()
+                        .map(SortItem::getSortKey)
+                        .collect(toImmutableList()))
+                .build();
+
+        PlanBuilder planBuilder = newPlanBuilder(subPlan, analysis, lambdaDeclarationToSymbolMap);
+
+        // no handleSubqueries because subqueries are not allowed here
+        planBuilder = planBuilder.appendProjections(inputs, symbolAllocator, idAllocator);
+
+        ImmutableList.Builder<Symbol> outputLayout = ImmutableList.builder();
+        boolean oneRowOutput = node.getRowsPerMatch().isEmpty() || node.getRowsPerMatch().get().isOneRow();
+
+        // Rewrite PARTITION BY in terms of pre-projected inputs
+        ImmutableList.Builder<Symbol> partitionBy = ImmutableList.builder();
+        for (Expression expression : node.getPartitionBy()) {
+            Symbol symbol = planBuilder.translate(expression);
+            partitionBy.add(symbol);
+            outputLayout.add(symbol);
+        }
+
+        // Rewrite ORDER BY in terms of pre-projected inputs
+        Map<Symbol, SortOrder> orderings = new LinkedHashMap<>();
+        for (SortItem item : getSortItemsFromOrderBy(node.getOrderBy())) {
+            Symbol symbol = planBuilder.translate(item.getSortKey());
+            // don't override existing keys, i.e. when "ORDER BY a ASC, a DESC" is specified
+            orderings.putIfAbsent(symbol, sortItemToSortOrder(item));
+            if (!oneRowOutput) {
+                outputLayout.add(symbol);
+            }
+        }
+        Optional<OrderingScheme> orderingScheme = Optional.empty();
+        if (!orderings.isEmpty()) {
+            orderingScheme = Optional.of(new OrderingScheme(ImmutableList.copyOf(orderings.keySet()), orderings));
+        }
+
+        // rewrite measures
+        ImmutableMap.Builder<Symbol, Measure> measures = ImmutableMap.builder();
+        for (MeasureDefinition measureDefinition : node.getMeasures()) {
+            Type type = analysis.getType(measureDefinition.getExpression());
+            Symbol symbol = symbolAllocator.newSymbol(measureDefinition.getName().getValue().toLowerCase(ENGLISH), type);
+            Expression expression = planBuilder.rewrite(measureDefinition.getExpression());
+            measures.put(symbol, new Measure(expression, type));
+            outputLayout.add(symbol);
+        }
+
+        if (!oneRowOutput) {
+            Set<Symbol> inputSymbolsOnOutput = ImmutableSet.copyOf(outputLayout.build());
+            subPlan.getFieldMappings().stream()
+                    .filter(symbol -> !inputSymbolsOnOutput.contains(symbol))
+                    .forEach(outputLayout::add);
+        }
+
+        // rewrite pattern
+        RowPattern pattern = rewriteWith(new RowPatternRewriter<>()
+        {
+            @Override
+            public RowPattern rewritePatternVariable(PatternVariable node, Void context, RowPatternTreeRewriter<Void> treeRewriter)
+            {
+                return new PatternLabel(Label.from(node.getName()));
+            }
+        }, node.getRowPatternCommon().getPattern());
+
+        // rewrite subsets
+        ImmutableMap.Builder<Label, Set<Label>> subsets = ImmutableMap.builder();
+        for (SubsetDefinition subsetDefinition : node.getRowPatternCommon().getSubsets()) {
+            Label label = Label.from(subsetDefinition.getName());
+            Set<Label> elements = subsetDefinition.getIdentifiers().stream()
+                    .map(Label::from)
+                    .collect(toImmutableSet());
+            subsets.put(label, elements);
+        }
+
+        // rewrite variable definitions
+        ImmutableMap.Builder<Label, Expression> variableDefinitions = ImmutableMap.builder();
+        for (VariableDefinition variableDefinition : node.getRowPatternCommon().getVariableDefinitions()) {
+            Label label = Label.from(variableDefinition.getName());
+            Expression expression = planBuilder.rewrite(variableDefinition.getExpression());
+            variableDefinitions.put(label, expression);
+        }
+
+        PatternRecognitionNode planNode = new PatternRecognitionNode(
+                idAllocator.getNextId(),
+                planBuilder.getRoot(),
+                new WindowNode.Specification(partitionBy.build(), orderingScheme),
+                Optional.empty(),
+                ImmutableSet.of(),
+                0,
+                measures.build(),
+                Optional.empty(),
+                node.getRowsPerMatch().orElse(ONE),
+                node.getRowPatternCommon().getAfterMatchSkipTo().flatMap(SkipTo::getIdentifier).map(Label::from),
+                node.getRowPatternCommon().getAfterMatchSkipTo().map(SkipTo::getPosition).orElse(PAST_LAST),
+                node.getRowPatternCommon().getInitial().orElse(TRUE),
+                pattern,
+                subsets.build(),
+                variableDefinitions.build());
+
+        return new RelationPlan(planNode, analysis.getScope(node), outputLayout.build(), outerContext);
     }
 
     @Override

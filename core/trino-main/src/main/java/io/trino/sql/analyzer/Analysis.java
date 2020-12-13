@@ -38,7 +38,9 @@ import io.trino.spi.eventlistener.TableInfo;
 import io.trino.spi.security.Identity;
 import io.trino.spi.security.ViewExpression;
 import io.trino.spi.type.Type;
+import io.trino.sql.analyzer.ExpressionAnalyzer.LabelPrefixedReference;
 import io.trino.sql.tree.AllColumns;
+import io.trino.sql.tree.DereferenceExpression;
 import io.trino.sql.tree.ExistsPredicate;
 import io.trino.sql.tree.Expression;
 import io.trino.sql.tree.FieldReference;
@@ -123,6 +125,11 @@ public class Analysis
 
     // Track referenced fields from source relation node
     private final Multimap<NodeRef<? extends Node>, Field> referencedFields = HashMultimap.create();
+
+    // Record fields prefixed with labels in row pattern recognition context
+    private final Map<NodeRef<DereferenceExpression>, LabelPrefixedReference> labelDereferences = new LinkedHashMap<>();
+
+    private final Set<NodeRef<FunctionCall>> patternRecognitionFunctions = new LinkedHashSet<>();
 
     private final Map<NodeRef<QuerySpecification>, List<FunctionCall>> aggregates = new LinkedHashMap<>();
     private final Map<NodeRef<OrderBy>, List<Expression>> orderByAggregates = new LinkedHashMap<>();
@@ -842,6 +849,26 @@ public class Analysis
     public void addReferencedFields(Multimap<NodeRef<Node>, Field> references)
     {
         referencedFields.putAll(references);
+    }
+
+    public void addLabelDereferences(Map<NodeRef<DereferenceExpression>, LabelPrefixedReference> dereferences)
+    {
+        labelDereferences.putAll(dereferences);
+    }
+
+    public LabelPrefixedReference getLabelDereference(DereferenceExpression expression)
+    {
+        return labelDereferences.get(NodeRef.of(expression));
+    }
+
+    public void addPatternRecognitionFunctions(Set<NodeRef<FunctionCall>> functions)
+    {
+        patternRecognitionFunctions.addAll(functions);
+    }
+
+    public boolean isPatternRecognitionFunction(FunctionCall functionCall)
+    {
+        return patternRecognitionFunctions.contains(NodeRef.of(functionCall));
     }
 
     public Map<AccessControlInfo, Map<QualifiedObjectName, Set<String>>> getTableColumnReferences()

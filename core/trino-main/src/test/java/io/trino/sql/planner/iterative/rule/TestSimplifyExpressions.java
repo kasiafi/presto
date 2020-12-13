@@ -42,7 +42,7 @@ import static io.trino.spi.type.IntegerType.INTEGER;
 import static io.trino.spi.type.RealType.REAL;
 import static io.trino.sql.ExpressionUtils.binaryExpression;
 import static io.trino.sql.ExpressionUtils.extractPredicates;
-import static io.trino.sql.ExpressionUtils.rewriteIdentifiersToSymbolReferences;
+import static io.trino.sql.ExpressionUtils.rewriteIdentifiersAndPatternRecognitionExpressions;
 import static io.trino.sql.planner.iterative.rule.SimplifyExpressions.rewrite;
 import static java.util.stream.Collectors.toList;
 import static org.testng.Assert.assertEquals;
@@ -123,8 +123,8 @@ public class TestSimplifyExpressions
     private static void assertSimplifies(String expression, String expected)
     {
         ParsingOptions parsingOptions = new ParsingOptions();
-        Expression actualExpression = rewriteIdentifiersToSymbolReferences(SQL_PARSER.createExpression(expression, parsingOptions));
-        Expression expectedExpression = rewriteIdentifiersToSymbolReferences(SQL_PARSER.createExpression(expected, parsingOptions));
+        Expression actualExpression = rewriteIdentifiersAndPatternRecognitionExpressions(SQL_PARSER.createExpression(expression, parsingOptions));
+        Expression expectedExpression = rewriteIdentifiersAndPatternRecognitionExpressions(SQL_PARSER.createExpression(expected, parsingOptions));
         Expression rewritten = rewrite(actualExpression, TEST_SESSION, new SymbolAllocator(booleanSymbolTypeMapFor(actualExpression)), METADATA, LITERAL_ENCODER, new TypeAnalyzer(SQL_PARSER, METADATA));
         assertEquals(
                 normalize(rewritten),
@@ -192,8 +192,8 @@ public class TestSimplifyExpressions
     private static void assertSimplifiesNumericTypes(String expression, String expected)
     {
         ParsingOptions parsingOptions = new ParsingOptions();
-        Expression actualExpression = rewriteIdentifiersToSymbolReferences(SQL_PARSER.createExpression(expression, parsingOptions));
-        Expression expectedExpression = rewriteIdentifiersToSymbolReferences(SQL_PARSER.createExpression(expected, parsingOptions));
+        Expression actualExpression = rewriteIdentifiersAndPatternRecognitionExpressions(SQL_PARSER.createExpression(expression, parsingOptions));
+        Expression expectedExpression = rewriteIdentifiersAndPatternRecognitionExpressions(SQL_PARSER.createExpression(expected, parsingOptions));
         Expression rewritten = rewrite(actualExpression, TEST_SESSION, new SymbolAllocator(numericAndBooleanSymbolTypeMapFor(actualExpression)), METADATA, LITERAL_ENCODER, new TypeAnalyzer(SQL_PARSER, METADATA));
         assertEquals(
                 normalize(rewritten),

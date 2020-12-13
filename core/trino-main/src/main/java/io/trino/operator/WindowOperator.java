@@ -36,7 +36,13 @@ import io.trino.spi.type.Type;
 import io.trino.spiller.Spiller;
 import io.trino.spiller.SpillerFactory;
 import io.trino.sql.gen.OrderingCompiler;
+import io.trino.sql.planner.LabelEvaluator;
+import io.trino.sql.planner.MeasureComputation;
+import io.trino.sql.planner.RowPatternNFA;
 import io.trino.sql.planner.plan.PlanNodeId;
+import io.trino.sql.tree.Label;
+import io.trino.sql.tree.PatternRecognitionRelation;
+import io.trino.sql.tree.SkipTo;
 
 import java.util.List;
 import java.util.Map;
@@ -45,7 +51,7 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiPredicate;
-import java.util.stream.Stream;
+import java.util.stream.Collectors;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkPositionIndex;
@@ -87,6 +93,16 @@ public class WindowOperator
         private final SpillerFactory spillerFactory;
         private final OrderingCompiler orderingCompiler;
 
+        // additional properties for row pattern recognition
+        private final List<MeasureComputation> measures;
+        private final Optional<FrameInfo> commonBaseFrame;
+        private final PatternRecognitionRelation.RowsPerMatch rowsPerMatch;
+        private final Optional<Label> skipToLabel;
+        private final SkipTo.Position skipToPosition;
+        private final boolean initial;
+        private final Optional<RowPatternNFA> rowPatternNFA;
+        private final Map<Label, LabelEvaluator.Evaluation> labelEvaluations;
+
         public WindowOperatorFactory(
                 int operatorId,
                 PlanNodeId planNodeId,
@@ -102,7 +118,15 @@ public class WindowOperator
                 PagesIndex.Factory pagesIndexFactory,
                 boolean spillEnabled,
                 SpillerFactory spillerFactory,
-                OrderingCompiler orderingCompiler)
+                OrderingCompiler orderingCompiler,
+                List<MeasureComputation> measures,
+                Optional<FrameInfo> commonBaseFrame,
+                PatternRecognitionRelation.RowsPerMatch rowsPerMatch,
+                Optional<Label> skipToLabel,
+                SkipTo.Position skipToPosition,
+                boolean initial,
+                Optional<RowPatternNFA> rowPatternNFA,
+                Map<Label, LabelEvaluator.Evaluation> labelEvaluations)
         {
             requireNonNull(sourceTypes, "sourceTypes is null");
             requireNonNull(planNodeId, "planNodeId is null");
@@ -119,6 +143,13 @@ public class WindowOperator
             checkArgument(sortChannels.size() == sortOrder.size(), "Must have same number of sort channels as sort orders");
             checkArgument(preSortedChannelPrefix <= sortChannels.size(), "Cannot have more pre-sorted channels than specified sorted channels");
             checkArgument(preSortedChannelPrefix == 0 || ImmutableSet.copyOf(preGroupedChannels).equals(ImmutableSet.copyOf(partitionChannels)), "preSortedChannelPrefix can only be greater than zero if all partition channels are pre-grouped");
+            requireNonNull(measures, "measures is null");
+            requireNonNull(commonBaseFrame, "commonBaseFrame is null");
+            requireNonNull(rowsPerMatch, "rowsPerMatch is null");
+            requireNonNull(skipToLabel, "skipToLabel is null");
+            requireNonNull(skipToPosition, "skipToPosition is null");
+            requireNonNull(rowPatternNFA, "rowPatternNFA is null");
+            requireNonNull(labelEvaluations, "labelEvaluations is null");
 
             this.pagesIndexFactory = pagesIndexFactory;
             this.operatorId = operatorId;
@@ -135,6 +166,14 @@ public class WindowOperator
             this.spillEnabled = spillEnabled;
             this.spillerFactory = spillerFactory;
             this.orderingCompiler = orderingCompiler;
+            this.measures = measures;
+            this.commonBaseFrame = commonBaseFrame;
+            this.rowsPerMatch = rowsPerMatch;
+            this.skipToLabel = skipToLabel;
+            this.skipToPosition = skipToPosition;
+            this.initial = initial;
+            this.rowPatternNFA = rowPatternNFA;
+            this.labelEvaluations = labelEvaluations;
         }
 
         @Override
@@ -157,7 +196,15 @@ public class WindowOperator
                     pagesIndexFactory,
                     spillEnabled,
                     spillerFactory,
-                    orderingCompiler);
+                    orderingCompiler,
+                    measures,
+                    commonBaseFrame,
+                    rowsPerMatch,
+                    skipToLabel,
+                    skipToPosition,
+                    initial,
+                    rowPatternNFA,
+                    labelEvaluations);
         }
 
         @Override
@@ -184,7 +231,15 @@ public class WindowOperator
                     pagesIndexFactory,
                     spillEnabled,
                     spillerFactory,
-                    orderingCompiler);
+                    orderingCompiler,
+                    measures,
+                    commonBaseFrame,
+                    rowsPerMatch,
+                    skipToLabel,
+                    skipToPosition,
+                    initial,
+                    rowPatternNFA,
+                    labelEvaluations);
         }
     }
 
@@ -200,6 +255,16 @@ public class WindowOperator
     private final WorkProcessor<Page> outputPages;
     private final PageBuffer pageBuffer = new PageBuffer();
 
+    // additional properties for row pattern recognition
+    private final List<MeasureComputation> measures;
+    private final Optional<FrameInfo> commonBaseFrame;
+    private final PatternRecognitionRelation.RowsPerMatch rowsPerMatch;
+    private final Optional<Label> skipToLabel;
+    private final SkipTo.Position skipToPosition;
+    private final boolean initial;
+    private final Optional<RowPatternNFA> rowPatternNFA;
+    private final Map<Label, LabelEvaluator.Evaluation> labelEvaluations;
+
     public WindowOperator(
             OperatorContext operatorContext,
             List<Type> sourceTypes,
@@ -214,7 +279,15 @@ public class WindowOperator
             PagesIndex.Factory pagesIndexFactory,
             boolean spillEnabled,
             SpillerFactory spillerFactory,
-            OrderingCompiler orderingCompiler)
+            OrderingCompiler orderingCompiler,
+            List<MeasureComputation> measures,
+            Optional<FrameInfo> commonBaseFrame,
+            PatternRecognitionRelation.RowsPerMatch rowsPerMatch,
+            Optional<Label> skipToLabel,
+            SkipTo.Position skipToPosition,
+            boolean initial,
+            Optional<RowPatternNFA> rowPatternNFA,
+            Map<Label, LabelEvaluator.Evaluation> labelEvaluations)
     {
         requireNonNull(operatorContext, "operatorContext is null");
         requireNonNull(outputChannels, "outputChannels is null");
@@ -229,6 +302,22 @@ public class WindowOperator
         checkArgument(sortChannels.size() == sortOrder.size(), "Must have same number of sort channels as sort orders");
         checkArgument(preSortedChannelPrefix <= sortChannels.size(), "Cannot have more pre-sorted channels than specified sorted channels");
         checkArgument(preSortedChannelPrefix == 0 || ImmutableSet.copyOf(preGroupedChannels).equals(ImmutableSet.copyOf(partitionChannels)), "preSortedChannelPrefix can only be greater than zero if all partition channels are pre-grouped");
+        requireNonNull(measures, "measures is null");
+        requireNonNull(commonBaseFrame, "commonBaseFrame is null");
+        requireNonNull(rowsPerMatch, "rowsPerMatch is null");
+        requireNonNull(skipToLabel, "skipToLabel is null");
+        requireNonNull(skipToPosition, "skipToPosition is null");
+        requireNonNull(rowPatternNFA, "rowPatternNFA is null");
+        requireNonNull(labelEvaluations, "labelEvaluations is null");
+
+        this.measures = measures;
+        this.commonBaseFrame = commonBaseFrame;
+        this.rowsPerMatch = rowsPerMatch;
+        this.skipToLabel = skipToLabel;
+        this.skipToPosition = skipToPosition;
+        this.initial = initial;
+        this.rowPatternNFA = rowPatternNFA;
+        this.labelEvaluations = labelEvaluations;
 
         this.operatorContext = operatorContext;
         this.outputChannels = Ints.toArray(outputChannels);
@@ -236,12 +325,17 @@ public class WindowOperator
                 .map(functionDefinition -> new FramedWindowFunction(functionDefinition.createWindowFunction(), functionDefinition.getFrameInfo()))
                 .collect(toImmutableList());
 
-        this.outputTypes = Stream.concat(
-                outputChannels.stream()
-                        .map(sourceTypes::get),
-                windowFunctionDefinitions.stream()
-                        .map(WindowFunctionDefinition::getType))
-                .collect(toImmutableList());
+        ImmutableList.Builder<Type> outputTypes = ImmutableList.builder();
+        outputTypes.addAll(outputChannels.stream()
+                .map(sourceTypes::get)
+                .collect(Collectors.toList()));
+        outputTypes.addAll(measures.stream()
+                .map(MeasureComputation::getType)
+                .collect(Collectors.toList()));
+        outputTypes.addAll(windowFunctionDefinitions.stream()
+                .map(WindowFunctionDefinition::getType)
+                .collect(Collectors.toList()));
+        this.outputTypes = outputTypes.build();
 
         List<Integer> unGroupedPartitionChannels = partitionChannels.stream()
                 .filter(channel -> !preGroupedChannels.contains(channel))
@@ -561,7 +655,24 @@ public class WindowOperator
 
                 int partitionEnd = findGroupEnd(pagesIndex, pagesIndexWithHashStrategies.unGroupedPartitionHashStrategy, partitionStart);
 
-                WindowPartition partition = new WindowPartition(pagesIndex, partitionStart, partitionEnd, outputChannels, windowFunctions, pagesIndexWithHashStrategies.peerGroupHashStrategy, pagesIndexWithHashStrategies.frameBoundComparators);
+                WindowPartition partition = new WindowPartition(
+                        pagesIndex,
+                        partitionStart,
+                        partitionEnd,
+                        outputChannels,
+                        windowFunctions,
+                        pagesIndexWithHashStrategies.peerGroupHashStrategy,
+                        pagesIndexWithHashStrategies.frameBoundComparators,
+                        measures,
+                        commonBaseFrame,
+                        rowsPerMatch,
+                        skipToLabel,
+                        skipToPosition,
+                        initial,
+                        rowPatternNFA,
+                        labelEvaluations,
+                        // label evaluator needs session
+                        operatorContext.getSession());
                 windowInfo.addPartition(partition);
                 partitionStart = partitionEnd;
                 return ProcessState.ofResult(partition);

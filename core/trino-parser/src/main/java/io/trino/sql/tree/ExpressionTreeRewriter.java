@@ -1032,6 +1032,68 @@ public final class ExpressionTreeRewriter<C>
 
             return node;
         }
+
+        @Override
+        protected Expression visitLabelDereference(LabelDereference node, Context<C> context)
+        {
+            if (!context.isDefaultRewrite()) {
+                Expression result = rewriter.rewriteLabelDereference(node, context.get(), ExpressionTreeRewriter.this);
+                if (result != null) {
+                    return result;
+                }
+            }
+
+            SymbolReference reference = rewrite(node.getReference(), context.get());
+            if (node.getReference() != reference) {
+                return new LabelDereference(node.getLabel(), reference);
+            }
+
+            return node;
+        }
+
+        @Override
+        protected Expression visitPatternNavigationFunction(PatternNavigationFunction node, Context<C> context)
+        {
+            if (!context.isDefaultRewrite()) {
+                Expression result = rewriter.rewritePatternNavigationFunction(node, context.get(), ExpressionTreeRewriter.this);
+                if (result != null) {
+                    return result;
+                }
+            }
+
+            Expression argument = rewrite(node.getArgument(), context.get());
+            if (node.getArgument() != argument) {
+                return new PatternNavigationFunction(node.getType(), argument, node.getOffset());
+            }
+
+            return node;
+        }
+
+        @Override
+        protected Expression visitMatchNumberFunction(MatchNumberFunction node, Context<C> context)
+        {
+            if (!context.isDefaultRewrite()) {
+                Expression result = rewriter.rewriteMatchNumberFunction(node, context.get(), ExpressionTreeRewriter.this);
+                if (result != null) {
+                    return result;
+                }
+            }
+
+            return node;
+        }
+
+        @Override
+        protected Expression visitClassifierFunction(ClassifierFunction node, Context<C> context)
+        {
+            if (!context.isDefaultRewrite()) {
+                Expression result = rewriter.rewriteClassifierFunction(node, context.get(), ExpressionTreeRewriter.this);
+                if (result != null) {
+                    return result;
+                }
+            }
+
+            return node;
+        }
     }
 
     public static class Context<C>

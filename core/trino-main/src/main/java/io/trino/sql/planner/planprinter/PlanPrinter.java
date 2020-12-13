@@ -71,6 +71,7 @@ import io.trino.sql.planner.plan.LimitNode;
 import io.trino.sql.planner.plan.MarkDistinctNode;
 import io.trino.sql.planner.plan.OffsetNode;
 import io.trino.sql.planner.plan.OutputNode;
+import io.trino.sql.planner.plan.PatternRecognitionNode;
 import io.trino.sql.planner.plan.PlanFragmentId;
 import io.trino.sql.planner.plan.PlanNode;
 import io.trino.sql.planner.plan.PlanNodeId;
@@ -630,6 +631,16 @@ public class PlanPrinter
                         Joiner.on(", ").join(function.getArguments()),
                         frameInfo);
             }
+            return processChildren(node, context);
+        }
+
+        @Override
+        public Void visitPatternRecognition(PatternRecognitionNode node, Void context)
+        {
+            NodeRepresentation nodeOutput = addNode(node, "PatterRecognition");
+
+            nodeOutput.appendDetailsLine("details info not yet supported");
+
             return processChildren(node, context);
         }
 

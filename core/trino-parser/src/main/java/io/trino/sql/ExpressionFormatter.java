@@ -29,6 +29,7 @@ import io.trino.sql.tree.BindExpression;
 import io.trino.sql.tree.BooleanLiteral;
 import io.trino.sql.tree.Cast;
 import io.trino.sql.tree.CharLiteral;
+import io.trino.sql.tree.ClassifierFunction;
 import io.trino.sql.tree.CoalesceExpression;
 import io.trino.sql.tree.ComparisonExpression;
 import io.trino.sql.tree.Cube;
@@ -59,11 +60,13 @@ import io.trino.sql.tree.IntervalDayTimeDataType;
 import io.trino.sql.tree.IntervalLiteral;
 import io.trino.sql.tree.IsNotNullPredicate;
 import io.trino.sql.tree.IsNullPredicate;
+import io.trino.sql.tree.LabelDereference;
 import io.trino.sql.tree.LambdaArgumentDeclaration;
 import io.trino.sql.tree.LambdaExpression;
 import io.trino.sql.tree.LikePredicate;
 import io.trino.sql.tree.LogicalBinaryExpression;
 import io.trino.sql.tree.LongLiteral;
+import io.trino.sql.tree.MatchNumberFunction;
 import io.trino.sql.tree.Node;
 import io.trino.sql.tree.NotExpression;
 import io.trino.sql.tree.NullIfExpression;
@@ -71,6 +74,7 @@ import io.trino.sql.tree.NullLiteral;
 import io.trino.sql.tree.NumericParameter;
 import io.trino.sql.tree.OrderBy;
 import io.trino.sql.tree.Parameter;
+import io.trino.sql.tree.PatternNavigationFunction;
 import io.trino.sql.tree.QuantifiedComparisonExpression;
 import io.trino.sql.tree.Rollup;
 import io.trino.sql.tree.Row;
@@ -734,6 +738,38 @@ public final class ExpressionFormatter
             }
 
             return builder.toString();
+        }
+
+        @Override
+        protected String visitLabelDereference(LabelDereference node, Void context)
+        {
+            // format LabelDereference L.x as "LABEL_DEREFERENCE("L", "x")"
+            // LabelDereference, like SymbolReference, is an IR-type expression. It is never a result of the parser.
+            // After being formatted this way for serialization, it will be parsed as functionCall
+            // and swapped back for LabelDereference.
+            return "LABEL_DEREFERENCE(" + formatIdentifier(node.getLabel().getName()) + ", " + process(node.getReference()) + ")";
+        }
+
+        @Override
+        protected String visitPatternNavigationFunction(PatternNavigationFunction node, Void context)
+        {
+            return node.getType() + "(" + process(node.getArgument()) + ", " + node.getOffset() + ")";
+        }
+
+        @Override
+        protected String visitClassifierFunction(ClassifierFunction node, Void context)
+        {
+            String argument = "";
+            if (node.getLabel().isPresent()) {
+                argument = formatIdentifier(node.getLabel().get().getName());
+            }
+            return "CLASSIFIER(" + argument + ")";
+        }
+
+        @Override
+        protected String visitMatchNumberFunction(MatchNumberFunction node, Void context)
+        {
+            return "MATCH_NUMBER()";
         }
 
         private String formatBinaryExpression(String operator, Expression left, Expression right)

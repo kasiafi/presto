@@ -917,6 +917,56 @@ public abstract class AstVisitor<R, C>
         return visitStatement(node, context);
     }
 
+    protected R visitMeasureDefinition(MeasureDefinition node, C context)
+    {
+        return visitNode(node, context);
+    }
+
+    protected R visitSkipTo(SkipTo node, C context)
+    {
+        return visitNode(node, context);
+    }
+
+    protected R visitRowPatternCommon(RowPatternCommon node, C context)
+    {
+        return visitNode(node, context);
+    }
+
+    protected R visitSubsetDefinition(SubsetDefinition node, C context)
+    {
+        return visitNode(node, context);
+    }
+
+    protected R visitVariableDefinition(VariableDefinition node, C context)
+    {
+        return visitNode(node, context);
+    }
+
+    protected R visitPatternRecognitionRelation(PatternRecognitionRelation node, C context)
+    {
+        return visitRelation(node, context);
+    }
+
+    protected R visitLabelDereference(LabelDereference node, C context)
+    {
+        return visitExpression(node, context);
+    }
+
+    protected R visitPatternNavigationFunction(PatternNavigationFunction node, C context)
+    {
+        return visitExpression(node, context);
+    }
+
+    protected R visitClassifierFunction(ClassifierFunction node, C context)
+    {
+        return visitExpression(node, context);
+    }
+
+    protected R visitMatchNumberFunction(MatchNumberFunction node, C context)
+    {
+        return visitExpression(node, context);
+    }
+
     protected R visitRowPattern(RowPattern node, C context)
     {
         return visitNode(node, context);
@@ -963,6 +1013,11 @@ public abstract class AstVisitor<R, C>
     }
 
     protected R visitPatternVariable(PatternVariable node, C context)
+    {
+        return visitRowPattern(node, context);
+    }
+
+    protected R visitPatternLabel(PatternLabel node, C context)
     {
         return visitRowPattern(node, context);
     }

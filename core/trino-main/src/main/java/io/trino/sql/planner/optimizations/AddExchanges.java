@@ -53,6 +53,7 @@ import io.trino.sql.planner.plan.JoinNode;
 import io.trino.sql.planner.plan.LimitNode;
 import io.trino.sql.planner.plan.MarkDistinctNode;
 import io.trino.sql.planner.plan.OutputNode;
+import io.trino.sql.planner.plan.PatternRecognitionNode;
 import io.trino.sql.planner.plan.PlanNode;
 import io.trino.sql.planner.plan.PlanVisitor;
 import io.trino.sql.planner.plan.ProjectNode;
@@ -288,6 +289,41 @@ public class AddExchanges
 
         @Override
         public PlanWithProperties visitWindow(WindowNode node, PreferredProperties preferredProperties)
+        {
+            List<LocalProperty<Symbol>> desiredProperties = new ArrayList<>();
+            if (!node.getPartitionBy().isEmpty()) {
+                desiredProperties.add(new GroupingProperty<>(node.getPartitionBy()));
+            }
+            node.getOrderingScheme().ifPresent(orderingScheme ->
+                    orderingScheme.getOrderBy().stream()
+                            .map(symbol -> new SortingProperty<>(symbol, orderingScheme.getOrdering(symbol)))
+                            .forEach(desiredProperties::add));
+
+            PlanWithProperties child = planChild(
+                    node,
+                    computePreference(
+                            partitionedWithLocal(ImmutableSet.copyOf(node.getPartitionBy()), desiredProperties),
+                            preferredProperties));
+
+            if (!child.getProperties().isStreamPartitionedOn(node.getPartitionBy()) &&
+                    !child.getProperties().isNodePartitionedOn(node.getPartitionBy())) {
+                if (node.getPartitionBy().isEmpty()) {
+                    child = withDerivedProperties(
+                            gatheringExchange(idAllocator.getNextId(), REMOTE, child.getNode()),
+                            child.getProperties());
+                }
+                else {
+                    child = withDerivedProperties(
+                            partitionedExchange(idAllocator.getNextId(), REMOTE, child.getNode(), node.getPartitionBy(), node.getHashSymbol()),
+                            child.getProperties());
+                }
+            }
+
+            return rebaseAndDeriveProperties(node, child);
+        }
+
+        @Override
+        public PlanWithProperties visitPatternRecognition(PatternRecognitionNode node, PreferredProperties preferredProperties)
         {
             List<LocalProperty<Symbol>> desiredProperties = new ArrayList<>();
             if (!node.getPartitionBy().isEmpty()) {

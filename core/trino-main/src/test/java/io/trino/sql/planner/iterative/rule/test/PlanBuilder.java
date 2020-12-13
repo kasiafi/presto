@@ -1096,7 +1096,7 @@ public class PlanBuilder
 
     public static Expression expression(String sql)
     {
-        return ExpressionUtils.rewriteIdentifiersToSymbolReferences(new SqlParser().createExpression(sql, new ParsingOptions()));
+        return ExpressionUtils.rewriteIdentifiersAndPatternRecognitionExpressions(new SqlParser().createExpression(sql, new ParsingOptions()));
     }
 
     public static List<Expression> expressions(String... expressions)

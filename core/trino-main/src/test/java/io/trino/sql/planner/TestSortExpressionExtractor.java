@@ -35,7 +35,7 @@ import static io.trino.metadata.MetadataManager.createTestMetadataManager;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.sql.ExpressionUtils.extractConjuncts;
-import static io.trino.sql.ExpressionUtils.rewriteIdentifiersToSymbolReferences;
+import static io.trino.sql.ExpressionUtils.rewriteIdentifiersAndPatternRecognitionExpressions;
 import static org.testng.Assert.assertEquals;
 
 public class TestSortExpressionExtractor
@@ -93,7 +93,7 @@ public class TestSortExpressionExtractor
 
     private Expression expression(String sql)
     {
-        return ExpressionTestUtils.planExpression(metadata, TEST_SESSION, TYPE_PROVIDER, rewriteIdentifiersToSymbolReferences(new SqlParser().createExpression(sql, new ParsingOptions())));
+        return ExpressionTestUtils.planExpression(metadata, TEST_SESSION, TYPE_PROVIDER, rewriteIdentifiersAndPatternRecognitionExpressions(new SqlParser().createExpression(sql, new ParsingOptions())));
     }
 
     private void assertNoSortExpression(String expression)

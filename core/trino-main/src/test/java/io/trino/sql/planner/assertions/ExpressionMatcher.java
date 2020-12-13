@@ -32,7 +32,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static com.google.common.base.Preconditions.checkState;
-import static io.trino.sql.ExpressionUtils.rewriteIdentifiersToSymbolReferences;
+import static io.trino.sql.ExpressionUtils.rewriteIdentifiersAndPatternRecognitionExpressions;
 import static java.util.Objects.requireNonNull;
 
 public class ExpressionMatcher
@@ -56,7 +56,7 @@ public class ExpressionMatcher
     private Expression expression(String sql)
     {
         SqlParser parser = new SqlParser();
-        return rewriteIdentifiersToSymbolReferences(parser.createExpression(sql, new ParsingOptions()));
+        return rewriteIdentifiersAndPatternRecognitionExpressions(parser.createExpression(sql, new ParsingOptions()));
     }
 
     public static ExpressionMatcher inPredicate(SymbolReference value, SymbolReference valueList)

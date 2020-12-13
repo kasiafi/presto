@@ -14,6 +14,7 @@
 package io.trino.operator;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.primitives.Ints;
 import io.airlift.units.DataSize;
 import io.trino.ExceededMemoryLimitException;
@@ -62,6 +63,8 @@ import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.VarcharType.VARCHAR;
 import static io.trino.sql.tree.FrameBound.Type.UNBOUNDED_FOLLOWING;
 import static io.trino.sql.tree.FrameBound.Type.UNBOUNDED_PRECEDING;
+import static io.trino.sql.tree.PatternRecognitionRelation.RowsPerMatch.ONE;
+import static io.trino.sql.tree.SkipTo.Position.PAST_LAST;
 import static io.trino.sql.tree.WindowFrame.Type.RANGE;
 import static io.trino.testing.MaterializedResult.resultBuilder;
 import static io.trino.testing.TestingTaskContext.createTaskContext;
@@ -845,7 +848,15 @@ public class TestWindowOperator
                 new PagesIndex.TestingFactory(false),
                 spillEnabled,
                 spillerFactory,
-                new OrderingCompiler(TYPE_OPERATORS_CACHE));
+                new OrderingCompiler(TYPE_OPERATORS_CACHE),
+                ImmutableList.of(),
+                Optional.empty(),
+                ONE,
+                Optional.empty(),
+                PAST_LAST,
+                true,
+                Optional.empty(),
+                ImmutableMap.of());
     }
 
     public static WindowOperatorFactory createFactoryUnbounded(
@@ -875,7 +886,15 @@ public class TestWindowOperator
                 new PagesIndex.TestingFactory(false),
                 spillEnabled,
                 spillerFactory,
-                new OrderingCompiler(TYPE_OPERATORS_CACHE));
+                new OrderingCompiler(TYPE_OPERATORS_CACHE),
+                ImmutableList.of(),
+                Optional.empty(),
+                ONE,
+                Optional.empty(),
+                PAST_LAST,
+                true,
+                Optional.empty(),
+                ImmutableMap.of());
     }
 
     private DriverContext createDriverContext()

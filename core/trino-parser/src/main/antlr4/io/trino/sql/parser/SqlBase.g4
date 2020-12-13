@@ -288,7 +288,7 @@ joinCriteria
     ;
 
 sampledRelation
-    : aliasedRelation (
+    : patternRecognitionRelation (
         TABLESAMPLE sampleType '(' percentage=expression ')'
       )?
     ;
@@ -296,6 +296,59 @@ sampledRelation
 sampleType
     : BERNOULLI
     | SYSTEM
+    ;
+
+patternRecognitionRelation
+    : aliasedRelation (patternRecognition (AS? identifier columnAliases?)?)?
+    ;
+
+patternRecognition
+    : MATCH_RECOGNIZE '('
+        (PARTITION BY partition+=expression (',' partition+=expression)*)?
+        (ORDER BY sortItem (',' sortItem)*)?
+        (MEASURES measureDefinition (',' measureDefinition)*)?
+        rowsPerMatch?
+        rowPatternCommon
+      ')'
+    ;
+
+measureDefinition
+    : expression AS identifier
+    ;
+
+rowsPerMatch
+    : ONE ROW PER MATCH
+    | ALL ROWS PER MATCH emptyMatchHandling?
+    ;
+
+emptyMatchHandling
+    : SHOW EMPTY MATCHES
+    | OMIT EMPTY MATCHES
+    | WITH UNMATCHED ROWS
+    ;
+
+rowPatternCommon
+    : (AFTER MATCH skipTo)?
+      (INITIAL | SEEK)?
+      PATTERN '(' patternAlternation ')'
+      (SUBSET subsetDefinition (',' subsetDefinition)*)?
+      DEFINE variableDefinition (',' variableDefinition)*
+    ;
+
+skipTo
+    : 'SKIP' TO NEXT ROW
+    | 'SKIP' PAST LAST ROW
+    | 'SKIP' TO FIRST identifier
+    | 'SKIP' TO LAST identifier
+    | 'SKIP' TO identifier
+    ;
+
+subsetDefinition
+    : name=identifier EQ '(' union+=identifier (',' union+=identifier)* ')'
+    ;
+
+variableDefinition
+    : identifier AS expression
     ;
 
 aliasedRelation
@@ -599,26 +652,26 @@ number
 
 nonReserved
     // IMPORTANT: this rule must only contain tokens. Nested rules are not supported. See SqlParser.exitNonReserved
-    : ADD | ADMIN | ALL | ANALYZE | ANY | ARRAY | ASC | AT | AUTHORIZATION
+    : ADD | ADMIN | AFTER | ALL | ANALYZE | ANY | ARRAY | ASC | AT | AUTHORIZATION
     | BERNOULLI
     | CALL | CASCADE | CATALOGS | COLUMN | COLUMNS | COMMENT | COMMIT | COMMITTED | CURRENT
-    | DATA | DATE | DAY | DEFINER | DESC | DISTRIBUTED | DOUBLE
-    | EXCLUDING | EXPLAIN
+    | DATA | DATE | DAY | DEFINE | DEFINER | DESC | DISTRIBUTED | DOUBLE
+    | EMPTY | EXCLUDING | EXPLAIN
     | FETCH | FILTER | FIRST | FOLLOWING | FORMAT | FUNCTIONS
     | GRANT | GRANTED | GRANTS | GRAPHVIZ | GROUPS
     | HOUR
-    | IF | IGNORE | INCLUDING | INPUT | INTERVAL | INVOKER | IO | ISOLATION
+    | IF | IGNORE | INCLUDING | INITIAL | INPUT | INTERVAL | INVOKER | IO | ISOLATION
     | JSON
     | LAST | LATERAL | LEVEL | LIMIT | LOGICAL
-    | MAP | MATCHED | MATERIALIZED | MERGE | MINUTE | MONTH
+    | MAP | MATCH | MATCHED | MATCHES | MATCH_RECOGNIZE | MATERIALIZED | MEASURES | MERGE | MINUTE | MONTH
     | NEXT | NFC | NFD | NFKC | NFKD | NO | NONE | NULLIF | NULLS
-    | OFFSET | ONLY | OPTION | ORDINALITY | OUTPUT | OVER
-    | PARTITION | PARTITIONS | PATH | PERMUTE | POSITION | PRECEDING | PRECISION | PRIVILEGES | PROPERTIES
+    | OFFSET | OMIT | ONE | ONLY | OPTION | ORDINALITY | OUTPUT | OVER
+    | PARTITION | PARTITIONS | PAST | PATH | PATTERN | PER | PERMUTE | POSITION | PRECEDING | PRECISION | PRIVILEGES | PROPERTIES
     | RANGE | READ | REFRESH | RENAME | REPEATABLE | REPLACE | RESET | RESPECT | RESTRICT | REVOKE | ROLE | ROLES | ROLLBACK | ROW | ROWS
-    | SCHEMA | SCHEMAS | SECOND | SECURITY | SERIALIZABLE | SESSION | SET | SETS
-    | SHOW | SOME | START | STATS | SUBSTRING | SYSTEM
+    | SCHEMA | SCHEMAS | SECOND | SECURITY | SEEK | SERIALIZABLE | SESSION | SET | SETS
+    | SHOW | SOME | START | STATS | SUBSET | SUBSTRING | SYSTEM
     | TABLES | TABLESAMPLE | TEXT | TIES | TIME | TIMESTAMP | TO | TRANSACTION | TRY_CAST | TYPE
-    | UNBOUNDED | UNCOMMITTED | UPDATE | USE | USER
+    | UNBOUNDED | UNCOMMITTED | UNMATCHED | UPDATE | USE | USER
     | VALIDATE | VERBOSE | VIEW
     | WINDOW | WITHOUT | WORK | WRITE
     | YEAR
@@ -627,6 +680,7 @@ nonReserved
 
 ADD: 'ADD';
 ADMIN: 'ADMIN';
+AFTER: 'AFTER';
 ALL: 'ALL';
 ALTER: 'ALTER';
 ANALYZE: 'ANALYZE';
@@ -669,11 +723,13 @@ DEFINER: 'DEFINER';
 DELETE: 'DELETE';
 DESC: 'DESC';
 DESCRIBE: 'DESCRIBE';
+DEFINE: 'DEFINE';
 DISTINCT: 'DISTINCT';
 DISTRIBUTED: 'DISTRIBUTED';
 DOUBLE: 'DOUBLE';
 DROP: 'DROP';
 ELSE: 'ELSE';
+EMPTY: 'EMPTY';
 END: 'END';
 ESCAPE: 'ESCAPE';
 EXCEPT: 'EXCEPT';
@@ -705,6 +761,7 @@ IF: 'IF';
 IGNORE: 'IGNORE';
 IN: 'IN';
 INCLUDING: 'INCLUDING';
+INITIAL: 'INITIAL';
 INNER: 'INNER';
 INPUT: 'INPUT';
 INSERT: 'INSERT';
@@ -727,8 +784,12 @@ LOCALTIME: 'LOCALTIME';
 LOCALTIMESTAMP: 'LOCALTIMESTAMP';
 LOGICAL: 'LOGICAL';
 MAP: 'MAP';
+MATCH: 'MATCH';
 MATCHED: 'MATCHED';
+MATCHES: 'MATCHES';
+MATCH_RECOGNIZE: 'MATCH_RECOGNIZE';
 MATERIALIZED: 'MATERIALIZED';
+MEASURES: 'MEASURES';
 MERGE: 'MERGE';
 MINUTE: 'MINUTE';
 MONTH: 'MONTH';
@@ -746,7 +807,9 @@ NULL: 'NULL';
 NULLIF: 'NULLIF';
 NULLS: 'NULLS';
 OFFSET: 'OFFSET';
+OMIT: 'OMIT';
 ON: 'ON';
+ONE: 'ONE';
 ONLY: 'ONLY';
 OPTION: 'OPTION';
 OR: 'OR';
@@ -757,7 +820,10 @@ OUTPUT: 'OUTPUT';
 OVER: 'OVER';
 PARTITION: 'PARTITION';
 PARTITIONS: 'PARTITIONS';
+PAST: 'PAST';
 PATH: 'PATH';
+PATTERN: 'PATTERN';
+PER: 'PER';
 PERMUTE: 'PERMUTE';
 POSITION: 'POSITION';
 PRECEDING: 'PRECEDING';
@@ -787,6 +853,7 @@ SCHEMA: 'SCHEMA';
 SCHEMAS: 'SCHEMAS';
 SECOND: 'SECOND';
 SECURITY: 'SECURITY';
+SEEK: 'SEEK';
 SELECT: 'SELECT';
 SERIALIZABLE: 'SERIALIZABLE';
 SESSION: 'SESSION';
@@ -796,6 +863,7 @@ SHOW: 'SHOW';
 SOME: 'SOME';
 START: 'START';
 STATS: 'STATS';
+SUBSET: 'SUBSET';
 SUBSTRING: 'SUBSTRING';
 SYSTEM: 'SYSTEM';
 TABLE: 'TABLE';
@@ -815,6 +883,7 @@ UESCAPE: 'UESCAPE';
 UNBOUNDED: 'UNBOUNDED';
 UNCOMMITTED: 'UNCOMMITTED';
 UNION: 'UNION';
+UNMATCHED: 'UNMATCHED';
 UNNEST: 'UNNEST';
 UPDATE: 'UPDATE';
 USE: 'USE';

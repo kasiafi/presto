@@ -43,7 +43,7 @@ import java.util.Map;
 import static com.google.common.base.Preconditions.checkArgument;
 import static io.trino.SessionTestUtils.TEST_SESSION;
 import static io.trino.spi.StandardErrorCode.EXPRESSION_NOT_CONSTANT;
-import static io.trino.sql.ExpressionUtils.rewriteIdentifiersToSymbolReferences;
+import static io.trino.sql.ExpressionUtils.rewriteIdentifiersAndPatternRecognitionExpressions;
 import static io.trino.sql.ParsingUtil.createParsingOptions;
 import static io.trino.sql.analyzer.SemanticExceptions.semanticException;
 import static io.trino.sql.analyzer.TypeSignatureTranslator.toSqlType;
@@ -96,7 +96,7 @@ public final class ExpressionTestUtils
         return transaction(new TestingTransactionManager(), new AllowAllAccessControl())
                 .singleStatement()
                 .execute(session, transactionSession -> {
-                    Expression rewritten = rewriteIdentifiersToSymbolReferences(expression);
+                    Expression rewritten = rewriteIdentifiersAndPatternRecognitionExpressions(expression);
                     rewritten = DesugarLikeRewriter.rewrite(rewritten, transactionSession, metadata, new TypeAnalyzer(SQL_PARSER, metadata), typeProvider);
                     rewritten = DesugarArrayConstructorRewriter.rewrite(rewritten, transactionSession, metadata, new TypeAnalyzer(SQL_PARSER, metadata), typeProvider);
                     rewritten = CanonicalizeExpressionRewriter.rewrite(rewritten, transactionSession, metadata, new TypeAnalyzer(SQL_PARSER, metadata), typeProvider);

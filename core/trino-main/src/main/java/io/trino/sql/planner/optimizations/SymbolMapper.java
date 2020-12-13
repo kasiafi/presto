@@ -25,6 +25,8 @@ import io.trino.sql.planner.plan.AggregationNode.Aggregation;
 import io.trino.sql.planner.plan.DistinctLimitNode;
 import io.trino.sql.planner.plan.GroupIdNode;
 import io.trino.sql.planner.plan.LimitNode;
+import io.trino.sql.planner.plan.PatternRecognitionNode;
+import io.trino.sql.planner.plan.PatternRecognitionNode.Measure;
 import io.trino.sql.planner.plan.PlanNode;
 import io.trino.sql.planner.plan.PlanNodeId;
 import io.trino.sql.planner.plan.RowNumberNode;
@@ -38,6 +40,7 @@ import io.trino.sql.planner.plan.WindowNode;
 import io.trino.sql.tree.Expression;
 import io.trino.sql.tree.ExpressionRewriter;
 import io.trino.sql.tree.ExpressionTreeRewriter;
+import io.trino.sql.tree.Label;
 import io.trino.sql.tree.SymbolReference;
 
 import java.util.HashMap;
@@ -234,6 +237,37 @@ public class SymbolMapper
         return new WindowNode.Specification(
                 mapAndDistinct(specification.getPartitionBy()),
                 specification.getOrderingScheme().map(this::map));
+    }
+
+    public PatternRecognitionNode map(PatternRecognitionNode node, PlanNode source)
+    {
+        ImmutableMap.Builder<Symbol, Measure> newMeasures = ImmutableMap.builder();
+        node.getMeasures().forEach((symbol, measure) -> {
+            Expression newExpression = map(measure.getExpression());
+            newMeasures.put(map(symbol), new Measure(newExpression, measure.getType()));
+        });
+
+        ImmutableMap.Builder<Label, Expression> newVariableDefinitions = ImmutableMap.builder();
+        node.getVariableDefinitions().forEach((label, expression) -> newVariableDefinitions.put(label, map(expression)));
+
+        return new PatternRecognitionNode(
+                node.getId(),
+                source,
+                mapAndDistinct(node.getSpecification()),
+                node.getHashSymbol().map(this::map),
+                node.getPrePartitionedInputs().stream()
+                        .map(this::map)
+                        .collect(toImmutableSet()),
+                node.getPreSortedOrderPrefix(),
+                newMeasures.build(),
+                node.getCommonBaseFrame().map(this::map),
+                node.getRowsPerMatch(),
+                node.getSkipToLabel(),
+                node.getSkipToPosition(),
+                node.isInitial(),
+                node.getPattern(),
+                node.getSubsets(),
+                newVariableDefinitions.build());
     }
 
     public LimitNode map(LimitNode node, PlanNode source)

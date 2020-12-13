@@ -19,15 +19,22 @@ import io.trino.metadata.Metadata;
 import io.trino.sql.planner.DeterminismEvaluator;
 import io.trino.sql.planner.Symbol;
 import io.trino.sql.planner.SymbolsExtractor;
+import io.trino.sql.tree.ClassifierFunction;
 import io.trino.sql.tree.Expression;
 import io.trino.sql.tree.ExpressionRewriter;
 import io.trino.sql.tree.ExpressionTreeRewriter;
+import io.trino.sql.tree.FunctionCall;
 import io.trino.sql.tree.GenericDataType;
 import io.trino.sql.tree.Identifier;
 import io.trino.sql.tree.IsNullPredicate;
+import io.trino.sql.tree.Label;
+import io.trino.sql.tree.LabelDereference;
 import io.trino.sql.tree.LambdaExpression;
 import io.trino.sql.tree.LogicalBinaryExpression;
 import io.trino.sql.tree.LogicalBinaryExpression.Operator;
+import io.trino.sql.tree.LongLiteral;
+import io.trino.sql.tree.MatchNumberFunction;
+import io.trino.sql.tree.PatternNavigationFunction;
 import io.trino.sql.tree.RowDataType;
 import io.trino.sql.tree.SymbolReference;
 
@@ -36,6 +43,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Queue;
 import java.util.Set;
 import java.util.function.Function;
@@ -45,6 +53,7 @@ import static com.google.common.base.Predicates.not;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static io.trino.sql.tree.BooleanLiteral.FALSE_LITERAL;
 import static io.trino.sql.tree.BooleanLiteral.TRUE_LITERAL;
+import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.toList;
 
@@ -328,10 +337,38 @@ public final class ExpressionUtils
         return result.build();
     }
 
-    public static Expression rewriteIdentifiersToSymbolReferences(Expression expression)
+    public static Expression rewriteIdentifiersAndPatternRecognitionExpressions(Expression expression)
     {
         return ExpressionTreeRewriter.rewriteWith(new ExpressionRewriter<>()
         {
+            @Override
+            public Expression rewriteFunctionCall(FunctionCall node, Void context, ExpressionTreeRewriter<Void> treeRewriter)
+            {
+                if (node.getName().getParts().size() > 1) {
+                    return super.rewriteFunctionCall(node, context, treeRewriter);
+                }
+
+                String functionName = node.getName().getSuffix().toUpperCase(ENGLISH);
+                switch (functionName) {
+                    case "FIRST":
+                    case "LAST":
+                    case "PREV":
+                    case "NEXT":
+                        return new PatternNavigationFunction(PatternNavigationFunction.Type.from(functionName), treeRewriter.rewrite(node.getArguments().get(0), context), ((LongLiteral) node.getArguments().get(1)).getValue());
+                    case "CLASSIFIER":
+                        if (node.getArguments().isEmpty()) {
+                            return new ClassifierFunction(Optional.empty());
+                        }
+                        return new ClassifierFunction(Optional.of(Label.from((Identifier) node.getArguments().get(0))));
+                    case "MATCH_NUMBER":
+                        return new MatchNumberFunction();
+                    case "LABEL_DEREFERENCE":
+                        return new LabelDereference(Label.from((Identifier) node.getArguments().get(0)), new SymbolReference(((Identifier) node.getArguments().get(1)).getValue()));
+                    default:
+                        return super.rewriteFunctionCall(node, context, treeRewriter);
+                }
+            }
+
             @Override
             public Expression rewriteIdentifier(Identifier node, Void context, ExpressionTreeRewriter<Void> treeRewriter)
             {

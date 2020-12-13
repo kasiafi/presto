@@ -17,8 +17,10 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import io.trino.metadata.ResolvedFunction;
 import io.trino.sql.analyzer.Analysis;
+import io.trino.sql.analyzer.ExpressionAnalyzer.LabelPrefixedReference;
 import io.trino.sql.analyzer.ResolvedField;
 import io.trino.sql.analyzer.Scope;
+import io.trino.sql.tree.ClassifierFunction;
 import io.trino.sql.tree.DereferenceExpression;
 import io.trino.sql.tree.Expression;
 import io.trino.sql.tree.ExpressionRewriter;
@@ -27,10 +29,16 @@ import io.trino.sql.tree.FieldReference;
 import io.trino.sql.tree.FunctionCall;
 import io.trino.sql.tree.GenericDataType;
 import io.trino.sql.tree.Identifier;
+import io.trino.sql.tree.Label;
+import io.trino.sql.tree.LabelDereference;
 import io.trino.sql.tree.LambdaArgumentDeclaration;
 import io.trino.sql.tree.LambdaExpression;
+import io.trino.sql.tree.MatchNumberFunction;
 import io.trino.sql.tree.NodeRef;
 import io.trino.sql.tree.Parameter;
+import io.trino.sql.tree.PatternNavigationFunction;
+import io.trino.sql.tree.PatternNavigationFunction.Type;
+import io.trino.sql.tree.QualifiedName;
 import io.trino.sql.tree.RowDataType;
 import io.trino.sql.tree.SymbolReference;
 import io.trino.sql.util.AstUtils;
@@ -45,8 +53,11 @@ import java.util.Optional;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Verify.verify;
+import static com.google.common.collect.ImmutableList.toImmutableList;
+import static com.google.common.collect.Iterables.getOnlyElement;
 import static io.trino.sql.planner.ScopeAware.scopeAwareKey;
 import static java.lang.String.format;
+import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
 
 /**
@@ -207,6 +218,13 @@ class TranslationMap
             @Override
             public Expression rewriteFunctionCall(FunctionCall node, Void context, ExpressionTreeRewriter<Void> treeRewriter)
             {
+                if (analysis.isPatternRecognitionFunction(node)) {
+                    List<Expression> rewrittenArguments = node.getArguments().stream()
+                            .map(argument -> treeRewriter.rewrite(argument, null))
+                            .collect(toImmutableList());
+                    return coerceIfNecessary(node, patternRecognitionFunction(node.getName(), rewrittenArguments));
+                }
+
                 Optional<Expression> mapped = tryGetMapping(node);
                 if (mapped.isPresent()) {
                     return coerceIfNecessary(node, mapped.get());
@@ -228,9 +246,40 @@ class TranslationMap
                 return coerceIfNecessary(node, rewritten);
             }
 
+            private Expression patternRecognitionFunction(QualifiedName name, List<Expression> arguments)
+            {
+                checkArgument(name.getParts().size() == 1, "unexpected pattern recognition function name: " + name);
+                String functionName = name.getSuffix().toUpperCase(ENGLISH);
+                switch (functionName) {
+                    case "FIRST":
+                    case "LAST":
+                    case "PREV":
+                    case "NEXT":
+                        return new PatternNavigationFunction(Type.from(functionName), arguments); //TODO do not rewrite the offset argument but immediately get the value (or record it during analysis and get it from analysis)
+                    case "CLASSIFIER":
+                        checkState(arguments.size() < 2, "unexpected arguments for CLASSIFIER function: " + arguments);
+                        if (arguments.isEmpty()) {
+                            return new ClassifierFunction(Optional.empty());
+                        }
+                        return new ClassifierFunction(Optional.of(Label.from((Identifier) getOnlyElement(arguments))));
+                    case "MATCH_NUMBER":
+                        checkState(arguments.isEmpty(), "unexpected arguments for MATCH_NUMBER function: " + arguments);
+                        return new MatchNumberFunction();
+                    default:
+                        throw new IllegalStateException("unexpected pattern recognition function name: " + name);
+                }
+            }
+
             @Override
             public Expression rewriteDereferenceExpression(DereferenceExpression node, Void context, ExpressionTreeRewriter<Void> treeRewriter)
             {
+                LabelPrefixedReference labelDereference = analysis.getLabelDereference(node);
+                if (labelDereference != null) {
+                    Expression rewritten = treeRewriter.rewrite(labelDereference.getExpression(), null);
+                    checkState(rewritten instanceof SymbolReference, "expected symbol reference, got: " + rewritten);
+                    return coerceIfNecessary(node, new LabelDereference(labelDereference.getLabel(), (SymbolReference) rewritten));
+                }
+
                 Optional<Expression> mapped = tryGetMapping(node);
                 if (mapped.isPresent()) {
                     return coerceIfNecessary(node, mapped.get());

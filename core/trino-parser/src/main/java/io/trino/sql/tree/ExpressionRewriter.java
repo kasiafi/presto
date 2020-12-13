@@ -244,4 +244,24 @@ public class ExpressionRewriter<C>
     {
         return rewriteExpression(node, context, treeRewriter);
     }
+
+    public Expression rewriteLabelDereference(LabelDereference node, C context, ExpressionTreeRewriter<C> treeRewriter)
+    {
+        return rewriteExpression(node, context, treeRewriter);
+    }
+
+    public Expression rewritePatternNavigationFunction(PatternNavigationFunction node, C context, ExpressionTreeRewriter<C> treeRewriter)
+    {
+        return rewriteExpression(node, context, treeRewriter);
+    }
+
+    public Expression rewriteClassifierFunction(ClassifierFunction node, C context, ExpressionTreeRewriter<C> treeRewriter)
+    {
+        return rewriteExpression(node, context, treeRewriter);
+    }
+
+    public Expression rewriteMatchNumberFunction(MatchNumberFunction node, C context, ExpressionTreeRewriter<C> treeRewriter)
+    {
+        return rewriteExpression(node, context, treeRewriter);
+    }
 }

@@ -91,7 +91,13 @@ import io.trino.operator.PagesIndex;
 import io.trino.operator.index.IndexJoinLookupStats;
 import io.trino.server.ExpressionSerialization.ExpressionDeserializer;
 import io.trino.server.ExpressionSerialization.ExpressionSerializer;
+import io.trino.server.LabelSerialization.LabelDeserializer;
+import io.trino.server.LabelSerialization.LabelKeyDeserializer;
+import io.trino.server.LabelSerialization.LabelKeySerializer;
+import io.trino.server.LabelSerialization.LabelSerializer;
 import io.trino.server.PluginManager.PluginsProvider;
+import io.trino.server.RowPatternSerialization.RowPatternDeserializer;
+import io.trino.server.RowPatternSerialization.RowPatternSerializer;
 import io.trino.server.SliceSerialization.SliceDeserializer;
 import io.trino.server.SliceSerialization.SliceSerializer;
 import io.trino.server.remotetask.HttpLocationFactory;
@@ -130,6 +136,8 @@ import io.trino.sql.planner.NodePartitioningManager;
 import io.trino.sql.planner.RuleStatsRecorder;
 import io.trino.sql.planner.TypeAnalyzer;
 import io.trino.sql.tree.Expression;
+import io.trino.sql.tree.Label;
+import io.trino.sql.tree.RowPattern;
 import io.trino.transaction.TransactionManagerConfig;
 import io.trino.type.BlockTypeOperators;
 import io.trino.type.TypeDeserializer;
@@ -390,6 +398,16 @@ public class ServerMainModule
         // expression
         jsonBinder(binder).addSerializerBinding(Expression.class).to(ExpressionSerializer.class);
         jsonBinder(binder).addDeserializerBinding(Expression.class).to(ExpressionDeserializer.class);
+
+        // row pattern
+        jsonBinder(binder).addSerializerBinding(RowPattern.class).to(RowPatternSerializer.class);
+        jsonBinder(binder).addDeserializerBinding(RowPattern.class).to(RowPatternDeserializer.class);
+
+        // pattern label
+        jsonBinder(binder).addSerializerBinding(Label.class).to(LabelSerializer.class);
+        jsonBinder(binder).addDeserializerBinding(Label.class).to(LabelDeserializer.class);
+        jsonBinder(binder).addKeySerializerBinding(Label.class).to(LabelKeySerializer.class);
+        jsonBinder(binder).addKeyDeserializerBinding(Label.class).to(LabelKeyDeserializer.class);
 
         // split monitor
         binder.bind(SplitMonitor.class).in(Scopes.SINGLETON);

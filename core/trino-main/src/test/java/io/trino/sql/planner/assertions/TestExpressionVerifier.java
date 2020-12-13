@@ -19,7 +19,7 @@ import io.trino.sql.tree.Expression;
 import io.trino.sql.tree.SymbolReference;
 import org.testng.annotations.Test;
 
-import static io.trino.sql.ExpressionUtils.rewriteIdentifiersToSymbolReferences;
+import static io.trino.sql.ExpressionUtils.rewriteIdentifiersAndPatternRecognitionExpressions;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertTrue;
@@ -127,6 +127,6 @@ public class TestExpressionVerifier
 
     private Expression expression(String sql)
     {
-        return rewriteIdentifiersToSymbolReferences(parser.createExpression(sql, new ParsingOptions()));
+        return rewriteIdentifiersAndPatternRecognitionExpressions(parser.createExpression(sql, new ParsingOptions()));
     }
 }

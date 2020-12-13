@@ -89,7 +89,7 @@ import static io.trino.spi.connector.SortOrder.ASC_NULLS_FIRST;
 import static io.trino.spi.connector.SortOrder.ASC_NULLS_LAST;
 import static io.trino.spi.connector.SortOrder.DESC_NULLS_FIRST;
 import static io.trino.spi.connector.SortOrder.DESC_NULLS_LAST;
-import static io.trino.sql.ExpressionUtils.rewriteIdentifiersToSymbolReferences;
+import static io.trino.sql.ExpressionUtils.rewriteIdentifiersAndPatternRecognitionExpressions;
 import static io.trino.sql.planner.assertions.MatchResult.NO_MATCH;
 import static io.trino.sql.planner.assertions.MatchResult.match;
 import static io.trino.sql.planner.assertions.StrictAssignedSymbolsMatcher.actualAssignments;
@@ -546,7 +546,7 @@ public final class PlanMatchPattern
                 new JoinMatcher(
                         joinType,
                         expectedEquiCriteria,
-                        expectedFilter.map(predicate -> rewriteIdentifiersToSymbolReferences(new SqlParser().createExpression(predicate, new ParsingOptions()))),
+                        expectedFilter.map(predicate -> rewriteIdentifiersAndPatternRecognitionExpressions(new SqlParser().createExpression(predicate, new ParsingOptions()))),
                         expectedDistributionType,
                         expectedSpillable,
                         expectedDynamicFilter));
@@ -565,13 +565,13 @@ public final class PlanMatchPattern
     public static PlanMatchPattern spatialJoin(String expectedFilter, Optional<String> kdbTree, Optional<List<String>> outputSymbols, PlanMatchPattern left, PlanMatchPattern right)
     {
         return node(SpatialJoinNode.class, left, right).with(
-                new SpatialJoinMatcher(SpatialJoinNode.Type.INNER, rewriteIdentifiersToSymbolReferences(new SqlParser().createExpression(expectedFilter, new ParsingOptions())), kdbTree, outputSymbols));
+                new SpatialJoinMatcher(SpatialJoinNode.Type.INNER, rewriteIdentifiersAndPatternRecognitionExpressions(new SqlParser().createExpression(expectedFilter, new ParsingOptions())), kdbTree, outputSymbols));
     }
 
     public static PlanMatchPattern spatialLeftJoin(String expectedFilter, PlanMatchPattern left, PlanMatchPattern right)
     {
         return node(SpatialJoinNode.class, left, right).with(
-                new SpatialJoinMatcher(SpatialJoinNode.Type.LEFT, rewriteIdentifiersToSymbolReferences(new SqlParser().createExpression(expectedFilter, new ParsingOptions())), Optional.empty(), Optional.empty()));
+                new SpatialJoinMatcher(SpatialJoinNode.Type.LEFT, rewriteIdentifiersAndPatternRecognitionExpressions(new SqlParser().createExpression(expectedFilter, new ParsingOptions())), Optional.empty(), Optional.empty()));
     }
 
     public static PlanMatchPattern unnest(PlanMatchPattern source)
@@ -598,7 +598,7 @@ public final class PlanMatchPattern
                         mappings,
                         ordinalitySymbol,
                         type,
-                        filter.map(predicate -> rewriteIdentifiersToSymbolReferences(new SqlParser().createExpression(predicate, new ParsingOptions())))));
+                        filter.map(predicate -> rewriteIdentifiersAndPatternRecognitionExpressions(new SqlParser().createExpression(predicate, new ParsingOptions())))));
 
         mappings.forEach(mapping -> {
             for (int i = 0; i < mapping.getOutputs().size(); i++) {
@@ -688,7 +688,7 @@ public final class PlanMatchPattern
 
     public static PlanMatchPattern filter(String expectedPredicate, PlanMatchPattern source)
     {
-        return filter(rewriteIdentifiersToSymbolReferences(new SqlParser().createExpression(expectedPredicate, new ParsingOptions())), source);
+        return filter(rewriteIdentifiersAndPatternRecognitionExpressions(new SqlParser().createExpression(expectedPredicate, new ParsingOptions())), source);
     }
 
     public static PlanMatchPattern filter(Expression expectedPredicate, PlanMatchPattern source)

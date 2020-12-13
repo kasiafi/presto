@@ -75,7 +75,7 @@ import static io.trino.sql.ExpressionFormatter.formatExpression;
 import static io.trino.sql.ExpressionTestUtils.assertExpressionEquals;
 import static io.trino.sql.ExpressionTestUtils.getTypes;
 import static io.trino.sql.ExpressionTestUtils.resolveFunctionCalls;
-import static io.trino.sql.ExpressionUtils.rewriteIdentifiersToSymbolReferences;
+import static io.trino.sql.ExpressionUtils.rewriteIdentifiersAndPatternRecognitionExpressions;
 import static io.trino.sql.ParsingUtil.createParsingOptions;
 import static io.trino.type.DateTimes.scaleEpochMillisToMicros;
 import static io.trino.type.IntervalDayTimeType.INTERVAL_DAY_TIME;
@@ -1466,7 +1466,7 @@ public class TestExpressionInterpreter
         for (Entry<Symbol, Type> entry : SYMBOL_TYPES.allTypes().entrySet()) {
             aliases.put(entry.getKey().getName(), new SymbolReference(entry.getKey().getName()));
         }
-        Expression rewrittenExpected = rewriteIdentifiersToSymbolReferences(SQL_PARSER.createExpression(expected, new ParsingOptions()));
+        Expression rewrittenExpected = rewriteIdentifiersAndPatternRecognitionExpressions(SQL_PARSER.createExpression(expected, new ParsingOptions()));
         assertExpressionEquals((Expression) actualOptimized, rewrittenExpected, aliases.build());
     }
 
@@ -1520,7 +1520,7 @@ public class TestExpressionInterpreter
                 .singleStatement()
                 .execute(TEST_SESSION, transactionSession -> {
                     Expression parsedExpression = SQL_PARSER.createExpression(expression, createParsingOptions(transactionSession));
-                    parsedExpression = rewriteIdentifiersToSymbolReferences(parsedExpression);
+                    parsedExpression = rewriteIdentifiersAndPatternRecognitionExpressions(parsedExpression);
                     parsedExpression = resolveFunctionCalls(METADATA, transactionSession, SYMBOL_TYPES, parsedExpression);
                     parsedExpression = CanonicalizeExpressionRewriter.rewrite(
                             parsedExpression,

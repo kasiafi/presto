@@ -28,7 +28,7 @@ import javax.inject.Inject;
 
 import java.io.IOException;
 
-import static io.trino.sql.ExpressionUtils.rewriteIdentifiersToSymbolReferences;
+import static io.trino.sql.ExpressionUtils.rewriteIdentifiersAndPatternRecognitionExpressions;
 
 public final class ExpressionSerialization
 {
@@ -60,7 +60,7 @@ public final class ExpressionSerialization
         public Expression deserialize(JsonParser jsonParser, DeserializationContext deserializationContext)
                 throws IOException
         {
-            return rewriteIdentifiersToSymbolReferences(sqlParser.createExpression(jsonParser.readValueAs(String.class), new ParsingOptions()));
+            return rewriteIdentifiersAndPatternRecognitionExpressions(sqlParser.createExpression(jsonParser.readValueAs(String.class), new ParsingOptions()));
         }
     }
 }

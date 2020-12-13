@@ -72,6 +72,7 @@ import io.trino.sql.tree.NaturalJoin;
 import io.trino.sql.tree.Node;
 import io.trino.sql.tree.Offset;
 import io.trino.sql.tree.OrderBy;
+import io.trino.sql.tree.PatternRecognitionRelation;
 import io.trino.sql.tree.Prepare;
 import io.trino.sql.tree.PrincipalSpecification;
 import io.trino.sql.tree.Property;
@@ -90,6 +91,7 @@ import io.trino.sql.tree.RevokeRoles;
 import io.trino.sql.tree.Rollback;
 import io.trino.sql.tree.Row;
 import io.trino.sql.tree.RowPattern;
+import io.trino.sql.tree.RowPatternCommon;
 import io.trino.sql.tree.SampledRelation;
 import io.trino.sql.tree.Select;
 import io.trino.sql.tree.SelectItem;
@@ -132,6 +134,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static com.google.common.collect.Iterables.transform;
@@ -537,6 +540,98 @@ public final class SqlFormatter
         }
 
         @Override
+        protected Void visitPatternRecognitionRelation(PatternRecognitionRelation node, Integer indent)
+        {
+            processRelationSuffix(node.getInput(), indent);
+
+            builder.append(" MATCH_RECOGNIZE (\n");
+            if (!node.getPartitionBy().isEmpty()) {
+                append(indent + 1, "PARTITION BY ")
+                        .append(node.getPartitionBy().stream()
+                                .map(ExpressionFormatter::formatExpression)
+                                .collect(joining(", ")))
+                        .append("\n");
+            }
+            if (node.getOrderBy().isPresent()) {
+                process(node.getOrderBy().get(), indent + 1);
+            }
+            if (!node.getMeasures().isEmpty()) {
+                append(indent + 1, "MEASURES");
+                formatDefinitionList(node.getMeasures().stream()
+                        .map(measure -> formatExpression(measure.getExpression()) + " AS " + formatExpression(measure.getName()))
+                        .collect(toImmutableList()), indent + 2);
+            }
+            if (node.getRowsPerMatch().isPresent()) {
+                String rowsPerMatch;
+                switch (node.getRowsPerMatch().get()) {
+                    case ONE:
+                        rowsPerMatch = "ONE ROW PER MATCH";
+                        break;
+                    case ALL_SHOW_EMPTY:
+                        rowsPerMatch = "ALL ROWS PER MATCH SHOW EMPTY MATCHES";
+                        break;
+                    case ALL_OMIT_EMPTY:
+                        rowsPerMatch = "ALL ROWS PER MATCH OMIT EMPTY MATCHES";
+                        break;
+                    case ALL_WITH_UNMATCHED:
+                        rowsPerMatch = "ALL ROWS PER MATCH WITH UNMATCHED ROWS";
+                        break;
+                    default:
+                        // RowsPerMatch of type WINDOW cannot occur in MATCH_RECOGNIZE clause
+                        throw new IllegalStateException("unexpected rowsPerMatch: " + node.getRowsPerMatch().get());
+                }
+                append(indent + 1, rowsPerMatch)
+                        .append("\n");
+            }
+            RowPatternCommon rowPatternCommon = node.getRowPatternCommon();
+            if (rowPatternCommon.getAfterMatchSkipTo().isPresent()) {
+                String skipTo;
+                switch (rowPatternCommon.getAfterMatchSkipTo().get().getPosition()) {
+                    case PAST_LAST:
+                        skipTo = "AFTER MATCH SKIP PAST LAST ROW";
+                        break;
+                    case NEXT:
+                        skipTo = "AFTER MATCH SKIP TO NEXT ROW";
+                        break;
+                    case LAST:
+                        checkState(rowPatternCommon.getAfterMatchSkipTo().get().getIdentifier().isPresent(), "missing identifier in AFTER MATCH SKIP TO LAST");
+                        skipTo = "AFTER MATCH SKIP TO LAST " + formatExpression(rowPatternCommon.getAfterMatchSkipTo().get().getIdentifier().get());
+                        break;
+                    case FIRST:
+                        checkState(rowPatternCommon.getAfterMatchSkipTo().get().getIdentifier().isPresent(), "missing identifier in AFTER MATCH SKIP TO FIRST");
+                        skipTo = "AFTER MATCH SKIP TO FIRST " + formatExpression(rowPatternCommon.getAfterMatchSkipTo().get().getIdentifier().get());
+                        break;
+                    default:
+                        throw new IllegalStateException("unexpected skipTo: " + rowPatternCommon.getAfterMatchSkipTo().get());
+                }
+                append(indent + 1, skipTo)
+                        .append("\n");
+            }
+            if (rowPatternCommon.getInitial().isPresent()) {
+                append(indent + 1, rowPatternCommon.getInitial().get() ? "INITIAL" : "SEEK")
+                        .append("\n");
+            }
+            append(indent + 1, "PATTERN (")
+                    .append(formatPattern(rowPatternCommon.getPattern()))
+                    .append(")\n");
+            if (!rowPatternCommon.getSubsets().isEmpty()) {
+                append(indent + 1, "SUBSET");
+                formatDefinitionList(rowPatternCommon.getSubsets().stream()
+                        .map(subset -> formatExpression(subset.getName()) + " = " + subset.getIdentifiers().stream()
+                                .map(ExpressionFormatter::formatExpression).collect(joining(", ", "(", ")")))
+                        .collect(toImmutableList()), indent + 2);
+            }
+            append(indent + 1, "DEFINE");
+            formatDefinitionList(rowPatternCommon.getVariableDefinitions().stream()
+                    .map(variable -> formatExpression(variable.getName()) + " AS " + formatExpression(variable.getExpression()))
+                    .collect(toImmutableList()), indent + 2);
+
+            builder.append(")");
+
+            return null;
+        }
+
+        @Override
         protected Void visitSampledRelation(SampledRelation node, Integer indent)
         {
             processRelationSuffix(node.getRelation(), indent);
@@ -552,7 +647,7 @@ public final class SqlFormatter
 
         private void processRelationSuffix(Relation relation, Integer indent)
         {
-            if ((relation instanceof AliasedRelation) || (relation instanceof SampledRelation)) {
+            if ((relation instanceof AliasedRelation) || (relation instanceof SampledRelation) || (relation instanceof PatternRecognitionRelation)) {
                 builder.append("( ");
                 process(relation, indent + 1);
                 append(indent, ")");
@@ -1698,6 +1793,24 @@ public final class SqlFormatter
         private static String indentString(int indent)
         {
             return Strings.repeat(INDENT, indent);
+        }
+
+        private void formatDefinitionList(List<String> elements, int indent)
+        {
+            if (elements.size() == 1) {
+                builder.append(" ")
+                        .append(getOnlyElement(elements))
+                        .append("\n");
+            }
+            else {
+                builder.append("\n");
+                for (int i = 0; i < elements.size() - 1; i++) {
+                    append(indent, elements.get(i))
+                            .append(",\n");
+                }
+                append(indent, elements.get(elements.size() - 1))
+                        .append("\n");
+            }
         }
     }
 

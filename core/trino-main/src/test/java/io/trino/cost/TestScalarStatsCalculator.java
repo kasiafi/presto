@@ -43,7 +43,7 @@ import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.DoubleType.DOUBLE;
 import static io.trino.spi.type.VarbinaryType.VARBINARY;
 import static io.trino.spi.type.VarcharType.createVarcharType;
-import static io.trino.sql.ExpressionUtils.rewriteIdentifiersToSymbolReferences;
+import static io.trino.sql.ExpressionUtils.rewriteIdentifiersAndPatternRecognitionExpressions;
 import static io.trino.sql.analyzer.TypeSignatureTranslator.toSqlType;
 import static io.trino.testing.TestingSession.testSessionBuilder;
 import static io.trino.transaction.TransactionBuilder.transaction;
@@ -504,6 +504,6 @@ public class TestScalarStatsCalculator
 
     private Expression expression(String sqlExpression)
     {
-        return rewriteIdentifiersToSymbolReferences(sqlParser.createExpression(sqlExpression, new ParsingOptions()));
+        return rewriteIdentifiersAndPatternRecognitionExpressions(sqlParser.createExpression(sqlExpression, new ParsingOptions()));
     }
 }

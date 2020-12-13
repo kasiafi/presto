@@ -22,6 +22,7 @@ import io.trino.sql.tree.Node;
 import io.trino.sql.tree.OneOrMoreQuantifier;
 import io.trino.sql.tree.PatternAlternation;
 import io.trino.sql.tree.PatternConcatenation;
+import io.trino.sql.tree.PatternLabel;
 import io.trino.sql.tree.PatternPermutation;
 import io.trino.sql.tree.PatternVariable;
 import io.trino.sql.tree.QuantifiedPattern;
@@ -152,6 +153,12 @@ public final class RowPatternFormatter
             String atLeast = node.getAtLeast().map(ExpressionFormatter::formatExpression).orElse("");
             String atMost = node.getAtMost().map(ExpressionFormatter::formatExpression).orElse("");
             return "{" + atLeast + "," + atMost + "}" + greedy;
+        }
+
+        @Override
+        protected String visitPatternLabel(PatternLabel node, Void context)
+        {
+            return node.getLabel().getName();
         }
     }
 }

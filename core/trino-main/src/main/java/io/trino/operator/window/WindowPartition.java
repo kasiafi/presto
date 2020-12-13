@@ -14,23 +14,43 @@
 package io.trino.operator.window;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
+import io.trino.Session;
 import io.trino.operator.PagesHashStrategy;
 import io.trino.operator.PagesIndex;
 import io.trino.operator.PagesIndexComparator;
 import io.trino.operator.WindowOperator.FrameBoundKey;
 import io.trino.spi.PageBuilder;
+import io.trino.spi.StandardErrorCode;
+import io.trino.spi.TrinoException;
+import io.trino.spi.block.Block;
 import io.trino.spi.function.WindowIndex;
+import io.trino.sql.planner.LabelEvaluator;
+import io.trino.sql.planner.LogicalIndexPointer;
+import io.trino.sql.planner.MeasureComputation;
+import io.trino.sql.planner.RowPatternMatcher;
+import io.trino.sql.planner.RowPatternMatcher.Exclusion;
+import io.trino.sql.planner.RowPatternMatcher.MatchResult;
+import io.trino.sql.planner.RowPatternNFA;
+import io.trino.sql.planner.Stack;
 import io.trino.sql.tree.FrameBound;
 import io.trino.sql.tree.FrameBound.Type;
+import io.trino.sql.tree.Label;
+import io.trino.sql.tree.PatternRecognitionRelation;
+import io.trino.sql.tree.SkipTo;
 import io.trino.sql.tree.SortItem.Ordering;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.stream.IntStream;
 
 import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static io.trino.operator.WindowOperator.FrameBoundKey.Type.END;
 import static io.trino.operator.WindowOperator.FrameBoundKey.Type.START;
 import static io.trino.sql.tree.FrameBound.Type.CURRENT_ROW;
@@ -38,16 +58,23 @@ import static io.trino.sql.tree.FrameBound.Type.FOLLOWING;
 import static io.trino.sql.tree.FrameBound.Type.PRECEDING;
 import static io.trino.sql.tree.FrameBound.Type.UNBOUNDED_FOLLOWING;
 import static io.trino.sql.tree.FrameBound.Type.UNBOUNDED_PRECEDING;
+import static io.trino.sql.tree.PatternRecognitionRelation.RowsPerMatch.WINDOW;
 import static io.trino.sql.tree.SortItem.Ordering.ASCENDING;
 import static io.trino.sql.tree.SortItem.Ordering.DESCENDING;
 import static io.trino.sql.tree.WindowFrame.Type.GROUPS;
 import static io.trino.sql.tree.WindowFrame.Type.RANGE;
+import static java.lang.Math.max;
 import static java.lang.Math.toIntExact;
+import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
+import static java.util.stream.IntStream.concat;
+import static java.util.stream.IntStream.range;
+import static java.util.stream.IntStream.rangeClosed;
 
 public final class WindowPartition
 {
     private final PagesIndex pagesIndex;
+    private final WindowIndex windowIndex;
     private final int partitionStart;
     private final int partitionEnd;
 
@@ -83,6 +110,21 @@ public final class WindowPartition
 
     private int currentPosition;
 
+    // additional properties for row pattern recognition
+    private final List<MeasureComputation> measures;
+    private final Optional<FrameInfo> commonBaseFrame;
+    private final PatternRecognitionRelation.RowsPerMatch rowsPerMatch;
+    private final Optional<Label> skipToLabel;
+    private final SkipTo.Position skipToPosition;
+    private final boolean initial;
+    private final Optional<RowPatternNFA> rowPatternNFA;
+    private final Map<Label, LabelEvaluator.Evaluation> labelEvaluations;
+    private final Session session;
+
+    private int lastSkippedPosition;
+    private int lastMatchedPosition;
+    private long matchNumber;
+
     public WindowPartition(
             PagesIndex pagesIndex,
             int partitionStart,
@@ -90,7 +132,16 @@ public final class WindowPartition
             int[] outputChannels,
             List<FramedWindowFunction> windowFunctions,
             PagesHashStrategy peerGroupHashStrategy,
-            Map<FrameBoundKey, PagesIndexComparator> frameBoundComparators)
+            Map<FrameBoundKey, PagesIndexComparator> frameBoundComparators,
+            List<MeasureComputation> measures,
+            Optional<FrameInfo> commonBaseFrame,
+            PatternRecognitionRelation.RowsPerMatch rowsPerMatch,
+            Optional<Label> skipToLabel,
+            SkipTo.Position skipToPosition,
+            boolean initial,
+            Optional<RowPatternNFA> rowPatternNFA,
+            Map<Label, LabelEvaluator.Evaluation> labelEvaluations,
+            Session session)
     {
         this.pagesIndex = pagesIndex;
         this.partitionStart = partitionStart;
@@ -99,9 +150,22 @@ public final class WindowPartition
         this.windowFunctions = ImmutableList.copyOf(windowFunctions);
         this.peerGroupHashStrategy = peerGroupHashStrategy;
         this.frameBoundComparators = frameBoundComparators;
+        this.measures = measures;
+        this.commonBaseFrame = commonBaseFrame;
+        this.rowsPerMatch = rowsPerMatch;
+        this.skipToLabel = skipToLabel;
+        this.skipToPosition = skipToPosition;
+        this.initial = initial;
+        this.rowPatternNFA = rowPatternNFA;
+        this.labelEvaluations = labelEvaluations;
+        this.session = session;
+
+        this.lastSkippedPosition = partitionStart - 1;
+        this.lastMatchedPosition = partitionStart - 1;
+        this.matchNumber = 1;
 
         // reset functions for new partition
-        WindowIndex windowIndex = new PagesWindowIndex(pagesIndex, partitionStart, partitionEnd);
+        this.windowIndex = new PagesWindowIndex(pagesIndex, partitionStart, partitionEnd);
         for (FramedWindowFunction framedWindowFunction : windowFunctions) {
             framedWindowFunction.getFunction().reset(windowIndex);
         }
@@ -183,6 +247,23 @@ public final class WindowPartition
     {
         checkState(hasNext(), "No more rows in partition");
 
+        // check for new peer group
+        if (currentPosition == peerGroupEnd) {
+            updatePeerGroup();
+        }
+
+        if (rowPatternNFA.isPresent()) {
+            processRowWithPatternMatching(pageBuilder);
+        }
+        else {
+            processRegularWindowRow(pageBuilder);
+        }
+
+        currentPosition++;
+    }
+
+    private void processRegularWindowRow(PageBuilder pageBuilder)
+    {
         // copy output channels
         pageBuilder.declarePosition();
         int channel = 0;
@@ -191,11 +272,7 @@ public final class WindowPartition
             channel++;
         }
 
-        // check for new peer group
-        if (currentPosition == peerGroupEnd) {
-            updatePeerGroup();
-        }
-
+        // append window functions
         for (int i = 0; i < windowFunctions.size(); i++) {
             FramedWindowFunction framedFunction = windowFunctions.get(i);
             Range range = getFrameRange(framedFunction.getFrame(), i);
@@ -207,8 +284,257 @@ public final class WindowPartition
                     range.getEnd());
             channel++;
         }
+    }
 
-        currentPosition++;
+    private void processRowWithPatternMatching(PageBuilder pageBuilder)
+    {
+        if (isSkipped(currentPosition)) {
+            // this position was skipped by AFTER MATCH SKIP of some previous row. no pattern match is attempted and frame is empty.
+            if (rowsPerMatch == WINDOW) {
+                outputUnmatchedRow(pageBuilder);
+            }
+        }
+        else {
+            // try match pattern from the current row on
+            // 1. determine pattern search boundaries.
+            //    - for MATCH_RECOGNIZE, pattern matching and associated computations can involve the whole partition
+            //    - for WINDOW, pattern matching and associated computations are limited to the "full frame", represented by commonBaseFrame. It is specified as "ROWS BETWEEN CURRENT ROW AND ..."
+            int searchStart = partitionStart;
+            int searchEnd = partitionEnd;
+            int patternStart = currentPosition;
+            if (commonBaseFrame.isPresent()) {
+                Range baseRange = getFrameRange(commonBaseFrame.get());
+                searchStart = baseRange.getStart();
+                searchEnd = baseRange.getEnd();
+            }
+            LabelEvaluator labelEvaluator = new LabelEvaluator(matchNumber, patternStart, searchStart, searchEnd, labelEvaluations, windowIndex, session);
+            RowPatternMatcher rowPatternMatcher = new RowPatternMatcher(rowPatternNFA.get(), labelEvaluator);
+            MatchResult matchResult = rowPatternMatcher.findMatch();
+
+            // 2. in case SEEK was specified (as opposite to INITIAL), try match pattern starting from subsequent rows until the first match is found
+            while (!matchResult.isMatched() && !initial && patternStart < searchEnd - 1) {
+                patternStart++;
+                labelEvaluator = new LabelEvaluator(matchNumber, patternStart, searchStart, searchEnd, labelEvaluations, windowIndex, session);
+                rowPatternMatcher = new RowPatternMatcher(rowPatternNFA.get(), labelEvaluator);
+                matchResult = rowPatternMatcher.findMatch();
+            }
+
+            // produce output depending on match and output mode (rowsPerMatch)
+            if (!matchResult.isMatched()) {
+                if (rowsPerMatch == WINDOW || (rowsPerMatch.isUnmatchedRows() && !isMatched(currentPosition))) {
+                    outputUnmatchedRow(pageBuilder);
+                }
+                lastSkippedPosition = currentPosition;
+            }
+            else if (matchResult.getLabels().isEmpty()) {
+                if (rowsPerMatch.isEmptyMatches()) {
+                    outputEmptyMatch(pageBuilder);
+                }
+                lastSkippedPosition = currentPosition;
+                matchNumber++;
+            }
+            else { // non-empty match
+                if (rowsPerMatch.isOneRow()) {
+                    outputOneRowPerMatch(pageBuilder, matchResult, patternStart, searchStart, searchEnd);
+                }
+                else {
+                    outputAllRowsPerMatch(pageBuilder, matchResult);
+                }
+                updateLastMatchedPosition(matchResult, patternStart);
+                skipAfterMatch(matchResult, patternStart, searchStart, searchEnd);
+                matchNumber++;
+            }
+        }
+    }
+
+    private boolean isSkipped(int position)
+    {
+        return position <= lastSkippedPosition;
+    }
+
+    private boolean isMatched(int position)
+    {
+        return position <= lastMatchedPosition;
+    }
+
+    // the output for unmatched row refers to no pattern match and empty frame.
+    private void outputUnmatchedRow(PageBuilder pageBuilder)
+    {
+        // copy output channels
+        pageBuilder.declarePosition();
+        int channel = 0;
+        while (channel < outputChannels.length) {
+            pagesIndex.appendTo(outputChannels[channel], currentPosition, pageBuilder.getBlockBuilder(channel));
+            channel++;
+        }
+        // measures are all null for no match
+        for (int i = 0; i < measures.size(); i++) {
+            pageBuilder.getBlockBuilder(channel).appendNull();
+            channel++;
+        }
+        // window functions have empty frame
+        for (FramedWindowFunction framedFunction : windowFunctions) {
+            Range range = new Range(-1, -1);
+            framedFunction.getFunction().processRow(
+                    pageBuilder.getBlockBuilder(channel),
+                    peerGroupStart - partitionStart,
+                    peerGroupEnd - partitionStart - 1,
+                    range.getStart(),
+                    range.getEnd());
+            channel++;
+        }
+    }
+
+    // the output for empty match refers to empty pattern match and empty frame.
+    private void outputEmptyMatch(PageBuilder pageBuilder)
+    {
+        // copy output channels
+        pageBuilder.declarePosition();
+        int channel = 0;
+        while (channel < outputChannels.length) {
+            pagesIndex.appendTo(outputChannels[channel], currentPosition, pageBuilder.getBlockBuilder(channel));
+            channel++;
+        }
+        // compute measures
+        for (MeasureComputation measureComputation : measures) {
+            Block result = measureComputation.computeEmpty(matchNumber, session);
+            measureComputation.getType().appendTo(result, 0, pageBuilder.getBlockBuilder(channel));
+            channel++;
+        }
+        // window functions have empty frame
+        for (FramedWindowFunction framedFunction : windowFunctions) {
+            Range range = new Range(-1, -1);
+            framedFunction.getFunction().processRow(
+                    pageBuilder.getBlockBuilder(channel),
+                    peerGroupStart - partitionStart,
+                    peerGroupEnd - partitionStart - 1,
+                    range.getStart(),
+                    range.getEnd());
+            channel++;
+        }
+    }
+
+    private void outputOneRowPerMatch(PageBuilder pageBuilder, MatchResult matchResult, int patternStart, int searchStart, int searchEnd)
+    {
+        // copy output channels
+        pageBuilder.declarePosition();
+        int channel = 0;
+        while (channel < outputChannels.length) {
+            pagesIndex.appendTo(outputChannels[channel], currentPosition, pageBuilder.getBlockBuilder(channel));
+            channel++;
+        }
+        // compute measures from the position of the last row of the match
+        Stack<Label> labels = matchResult.getLabels();
+        for (MeasureComputation measureComputation : measures) {
+            Block result = measureComputation.compute(patternStart + labels.size() - 1, labels.size(), labels, searchStart, searchEnd, patternStart, matchNumber, windowIndex, session);
+            measureComputation.getType().appendTo(result, 0, pageBuilder.getBlockBuilder(channel));
+            channel++;
+        }
+        // window functions have frame consisting of all rows of the match
+        for (FramedWindowFunction framedFunction : windowFunctions) {
+            framedFunction.getFunction().processRow(
+                    pageBuilder.getBlockBuilder(channel),
+                    peerGroupStart - partitionStart,
+                    peerGroupEnd - partitionStart - 1,
+                    patternStart - partitionStart,
+                    patternStart + labels.size() - 1 - partitionStart);
+            channel++;
+        }
+    }
+
+    private void outputAllRowsPerMatch(PageBuilder pageBuilder, MatchResult matchResult)
+    {
+        // window functions are not allowed with ALL ROWS PER MATCH
+        checkState(windowFunctions.isEmpty(), "invalid node: window functions specified with ALL ROWS PER MATCH");
+
+        Stack<Label> labels = matchResult.getLabels();
+
+        // determine positions to output
+        List<Integer> positionsToOutput;
+
+        if (matchResult.getExclusions().isEmpty()) {
+            positionsToOutput = range(currentPosition, currentPosition + labels.size())
+                    .boxed()
+                    .collect(toImmutableList());
+        }
+        else {
+            List<Exclusion> exclusions = matchResult.getExclusions();
+            IntStream relativePositions = range(1, exclusions.get(0).getStart());
+            for (int i = 0; i < exclusions.size() - 1; i++) {
+                relativePositions = concat(relativePositions, range(exclusions.get(i).getEnd(), exclusions.get(i + 1).getStart()));
+            }
+            relativePositions = concat(relativePositions, rangeClosed(exclusions.get(exclusions.size() - 1).getEnd(), labels.size()));
+            positionsToOutput = relativePositions
+                    .map(relativePosition -> currentPosition + relativePosition - 1)
+                    .boxed()
+                    .collect(toImmutableList());
+        }
+
+        for (int i : positionsToOutput) {
+            // copy output channels
+            pageBuilder.declarePosition();
+            int channel = 0;
+            while (channel < outputChannels.length) {
+                pagesIndex.appendTo(outputChannels[channel], i, pageBuilder.getBlockBuilder(channel));
+                channel++;
+            }
+            // compute measures from the current position (the position from which measures are computed matters in RUNNING semantics)
+            for (MeasureComputation measureComputation : measures) {
+                Block result = measureComputation.compute(i, labels.size(), labels, partitionStart, partitionEnd, currentPosition, matchNumber, windowIndex, session);
+                measureComputation.getType().appendTo(result, 0, pageBuilder.getBlockBuilder(channel));
+                channel++;
+            }
+        }
+    }
+
+    private void updateLastMatchedPosition(MatchResult matchResult, int patternStart)
+    {
+        int lastPositionInMatch = patternStart + matchResult.getLabels().size() - 1;
+        lastMatchedPosition = max(lastMatchedPosition, lastPositionInMatch);
+    }
+
+    private void skipAfterMatch(MatchResult matchResult, int patternStart, int searchStart, int searchEnd)
+    {
+        Stack<Label> labels = matchResult.getLabels();
+        LogicalIndexPointer skipToPointer;
+        OptionalInt resolvedPosition;
+        int position;
+        switch (skipToPosition) {
+            case PAST_LAST:
+                lastSkippedPosition = patternStart + labels.size() - 1;
+                break;
+            case NEXT:
+                lastSkippedPosition = currentPosition;
+                break;
+            case LAST:
+                checkState(skipToLabel.isPresent(), "skip to label is missing for SKIP TO LAST");
+                skipToPointer = new LogicalIndexPointer(ImmutableSet.of(skipToLabel.get()), true, false, 0, 0);
+                resolvedPosition = skipToPointer.resolvePosition(patternStart + labels.size() - 1, labels.size(), labels, searchStart, searchEnd, patternStart);
+                if (resolvedPosition.isEmpty()) {
+                    throw new TrinoException(StandardErrorCode.GENERIC_USER_ERROR, format("AFTER MATCH SKIP failed: pattern variable %s is not present in match", skipToLabel.get().getName()));
+                }
+                position = resolvedPosition.getAsInt();
+                if (position == patternStart) {
+                    throw new TrinoException(StandardErrorCode.GENERIC_USER_ERROR, "AFTER MATCH SKIP failed: cannot skip to first row of match");
+                }
+                lastSkippedPosition = position - 1;
+                break;
+            case FIRST:
+                checkState(skipToLabel.isPresent(), "skip to label is missing for SKIP TO FIRST");
+                skipToPointer = new LogicalIndexPointer(ImmutableSet.of(skipToLabel.get()), false, false, 0, 0);
+                resolvedPosition = skipToPointer.resolvePosition(patternStart + labels.size() - 1, labels.size(), labels, searchStart, searchEnd, patternStart);
+                if (resolvedPosition.isEmpty()) {
+                    throw new TrinoException(StandardErrorCode.GENERIC_USER_ERROR, format("AFTER MATCH SKIP failed: pattern variable %s is not present in match", skipToLabel.get().getName()));
+                }
+                position = resolvedPosition.getAsInt();
+                if (position == patternStart) {
+                    throw new TrinoException(StandardErrorCode.GENERIC_USER_ERROR, "AFTER MATCH SKIP failed: cannot skip to first row of match");
+                }
+                lastSkippedPosition = position - 1;
+                break;
+            default:
+                throw new IllegalStateException("unexpected SKIP TO position: " + skipToPosition);
+        }
     }
 
     private static class Range

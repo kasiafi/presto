@@ -64,6 +64,7 @@ import io.trino.sql.tree.BindExpression;
 import io.trino.sql.tree.BooleanLiteral;
 import io.trino.sql.tree.Cast;
 import io.trino.sql.tree.CharLiteral;
+import io.trino.sql.tree.ClassifierFunction;
 import io.trino.sql.tree.CoalesceExpression;
 import io.trino.sql.tree.ComparisonExpression;
 import io.trino.sql.tree.CurrentPath;
@@ -88,11 +89,13 @@ import io.trino.sql.tree.InPredicate;
 import io.trino.sql.tree.IntervalLiteral;
 import io.trino.sql.tree.IsNotNullPredicate;
 import io.trino.sql.tree.IsNullPredicate;
+import io.trino.sql.tree.Label;
 import io.trino.sql.tree.LambdaArgumentDeclaration;
 import io.trino.sql.tree.LambdaExpression;
 import io.trino.sql.tree.LikePredicate;
 import io.trino.sql.tree.LogicalBinaryExpression;
 import io.trino.sql.tree.LongLiteral;
+import io.trino.sql.tree.MatchNumberFunction;
 import io.trino.sql.tree.Node;
 import io.trino.sql.tree.NodeRef;
 import io.trino.sql.tree.NotExpression;
@@ -137,6 +140,7 @@ import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Verify.verify;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.Iterables.getOnlyElement;
+import static io.trino.spi.StandardErrorCode.COLUMN_NOT_FOUND;
 import static io.trino.spi.StandardErrorCode.EXPRESSION_NOT_CONSTANT;
 import static io.trino.spi.StandardErrorCode.FUNCTION_NOT_AGGREGATE;
 import static io.trino.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT;
@@ -147,6 +151,7 @@ import static io.trino.spi.StandardErrorCode.INVALID_WINDOW_FRAME;
 import static io.trino.spi.StandardErrorCode.MISSING_ORDER_BY;
 import static io.trino.spi.StandardErrorCode.NESTED_WINDOW;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
+import static io.trino.spi.StandardErrorCode.NUMERIC_VALUE_OUT_OF_RANGE;
 import static io.trino.spi.StandardErrorCode.OPERATOR_NOT_FOUND;
 import static io.trino.spi.StandardErrorCode.TOO_MANY_ARGUMENTS;
 import static io.trino.spi.StandardErrorCode.TYPE_MISMATCH;
@@ -208,6 +213,7 @@ import static java.lang.Math.toIntExact;
 import static java.lang.String.format;
 import static java.util.Collections.unmodifiableMap;
 import static java.util.Collections.unmodifiableSet;
+import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
 
 public class ExpressionAnalyzer
@@ -248,6 +254,11 @@ public class ExpressionAnalyzer
 
     // Track referenced fields from source relation node
     private final Multimap<NodeRef<Node>, Field> referencedFields = HashMultimap.create();
+
+    // Record fields prefixed with labels in row pattern recognition context
+    private final Map<NodeRef<DereferenceExpression>, LabelPrefixedReference> labelDereferences = new LinkedHashMap<>();
+    // Record functions specific to row pattern recognition context
+    private final Set<NodeRef<FunctionCall>> patternRecognitionFunctions = new LinkedHashSet<>();
 
     private final Session session;
     private final Map<NodeRef<Parameter>, Expression> parameters;
@@ -359,6 +370,12 @@ public class ExpressionAnalyzer
         return visitor.process(expression, new StackableAstVisitor.StackableAstVisitorContext<>(Context.notInLambda(scope)));
     }
 
+    private Type analyze(Expression expression, Scope scope, Set<Label> labels)
+    {
+        Visitor visitor = new Visitor(scope, warningCollector);
+        return visitor.process(expression, new StackableAstVisitor.StackableAstVisitorContext<>(Context.patternRecognition(scope, labels)));
+    }
+
     private Type analyze(Expression expression, Scope baseScope, Context context)
     {
         Visitor visitor = new Visitor(baseScope, warningCollector);
@@ -399,6 +416,16 @@ public class ExpressionAnalyzer
     public Multimap<NodeRef<Node>, Field> getReferencedFields()
     {
         return referencedFields;
+    }
+
+    public Map<NodeRef<DereferenceExpression>, LabelPrefixedReference> getLabelDereferences()
+    {
+        return labelDereferences;
+    }
+
+    public Set<NodeRef<FunctionCall>> getPatternRecognitionFunctions()
+    {
+        return patternRecognitionFunctions;
     }
 
     private class Visitor
@@ -524,6 +551,27 @@ public class ExpressionAnalyzer
 
             // If this Dereference looks like column reference, try match it to column first.
             if (qualifiedName != null) {
+                // In the context of row pattern matching, fields are optionally prefixed with labels. Labels are irrelevant during type analysis.
+                if (context.getContext().isPatternRecognition()) {
+                    if (qualifiedName.getParts().size() > 1) {
+                        Optional<Label> label = Label.tryCreateFrom(qualifiedName.getOriginalParts().get(0));
+                        if (label.isPresent() && context.getContext().getLabels().contains(label.get())) {
+                            QualifiedName unlabeledName = QualifiedName.of(qualifiedName.getOriginalParts().subList(1, qualifiedName.getOriginalParts().size()));
+                            Expression unlabeled = DereferenceExpression.from(unlabeledName);
+                            // If a dereference is prefixed with label, it must refer to input column (i.e. it must not be a row field reference)
+                            Optional<ResolvedField> resolvedField = context.getContext().getScope().tryResolveField(unlabeled, unlabeledName);
+                            if (resolvedField.isEmpty()) {
+                                throw semanticException(COLUMN_NOT_FOUND, node, "Column %s prefixed with label %s is not present in the input relation", unlabeledName, label.get().getName());
+                            }
+                            // Correlation is not allowed in pattern recognition context. CorrelationSupport.DISALLOWED was set when creating the ExpressionAnalyzer,
+                            // and so the following call should fail if the field is from outer scope.
+                            Type type = process(unlabeled, new StackableAstVisitorContext<>(context.getContext().notExpectingLabels()));
+                            labelDereferences.put(NodeRef.of(node), new LabelPrefixedReference(label.get(), unlabeled));
+                            return setExpressionType(node, type);
+                        }
+                    }
+                }
+
                 Scope scope = context.getContext().getScope();
                 Optional<ResolvedField> resolvedField = scope.tryResolveField(node, qualifiedName);
                 if (resolvedField.isPresent()) {
@@ -970,8 +1018,27 @@ public class ExpressionAnalyzer
         }
 
         @Override
+        protected Type visitClassifierFunction(ClassifierFunction node, StackableAstVisitorContext<Context> context)
+        {
+            return setExpressionType(node, VARCHAR);
+        }
+
+        @Override
+        protected Type visitMatchNumberFunction(MatchNumberFunction node, StackableAstVisitorContext<Context> context)
+        {
+            return setExpressionType(node, BIGINT);
+        }
+
+        @Override
         protected Type visitFunctionCall(FunctionCall node, StackableAstVisitorContext<Context> context)
         {
+            if (context.getContext().isPatternRecognition() && isPatternRecognitionFunction(node)) {
+                return analyzePatternRecognitionFunction(node, context);
+            }
+            if (context.getContext().isPatternRecognition() && metadata.isAggregationFunction(node.getName())) {
+                throw semanticException(NOT_SUPPORTED, node, "Aggregations in pattern recognition context are not yet supported");
+            }
+
             if (node.getWindow().isPresent()) {
                 ResolvedWindow window = getResolvedWindow.apply(node);
                 checkState(window != null, "no resolved window for: " + node);
@@ -1287,6 +1354,95 @@ public class ExpressionAnalyzer
             }
 
             return argumentTypesBuilder.build();
+        }
+
+        private boolean isPatternRecognitionFunction(FunctionCall node)
+        {
+            QualifiedName qualifiedName = node.getName();
+            if (qualifiedName.getParts().size() > 1) {
+                return false;
+            }
+            String name = qualifiedName.getSuffix();
+            return name.equalsIgnoreCase("FIRST") ||
+                    name.equalsIgnoreCase("LAST") ||
+                    name.equalsIgnoreCase("PREV") ||
+                    name.equalsIgnoreCase("NEXT") ||
+                    name.equalsIgnoreCase("CLASSIFIER") ||
+                    name.equalsIgnoreCase("MATCH_NUMBER");
+        }
+
+        private Type analyzePatternRecognitionFunction(FunctionCall node, StackableAstVisitorContext<Context> context)
+        {
+            if (node.getWindow().isPresent()) {
+                throw semanticException(NOT_SUPPORTED, node, "Cannot use OVER with %s pattern recognition function", node.getName());
+            }
+            if (node.getFilter().isPresent()) {
+                throw semanticException(NOT_SUPPORTED, node, "Cannot use FILTER with %s pattern recognition function", node.getName());
+            }
+            if (node.getOrderBy().isPresent()) {
+                throw semanticException(NOT_SUPPORTED, node, "Cannot use ORDER BY with %s pattern recognition function", node.getName());
+            }
+            if (node.isDistinct()) {
+                throw semanticException(NOT_SUPPORTED, node, "Cannot use DISTINCT with %s pattern recognition function", node.getName());
+            }
+
+            patternRecognitionFunctions.add(NodeRef.of(node));
+
+            String name = node.getName().getSuffix();
+
+            switch (name.toUpperCase(ENGLISH)) {
+                case "FIRST":
+                case "LAST":
+                case "PREV":
+                case "NEXT":
+                    if (node.getArguments().size() != 1 && node.getArguments().size() != 2) {
+                        throw semanticException(INVALID_FUNCTION_ARGUMENT, node, "%s pattern recognition function requires 1 or 2 arguments", node.getName());
+                    }
+                    Type resultType = process(node.getArguments().get(0), context);
+                    if (node.getArguments().size() == 2) {
+                        process(node.getArguments().get(1), context);
+                        // TODO the offset argument must be effectively constant, not necessarily a number. This could be extended with the use of ConstantAnalyzer.
+                        if (!(node.getArguments().get(1) instanceof LongLiteral)) {
+                            throw semanticException(INVALID_FUNCTION_ARGUMENT, node, "%s pattern recognition navigation function requires number as the second argument", node.getName());
+                        }
+                        long offset = ((LongLiteral) node.getArguments().get(1)).getValue();
+                        if (offset < 0) {
+                            throw semanticException(NUMERIC_VALUE_OUT_OF_RANGE, node, "%s pattern recognition navigation function requires non-negative number as the second argument (actual: %s)", node.getName(), offset);
+                        }
+                        if (offset > Integer.MAX_VALUE) {
+                            throw semanticException(NUMERIC_VALUE_OUT_OF_RANGE, node, "The second argument of %s pattern recognition navigation function must not exceed %s (actual: %s)", node.getName(), Integer.MAX_VALUE, offset);
+                        }
+                    }
+                    // TODO check consistent label inside
+                    // TODO check nesting of navigation functions --> immediate nesting required!
+                    return setExpressionType(node, resultType);
+                case "MATCH_NUMBER":
+                    if (node.getArguments().size() != 0) {
+                        throw semanticException(INVALID_FUNCTION_ARGUMENT, node, "MATCH_NUMBER pattern recognition function takes no arguments");
+                    }
+                    return setExpressionType(node, BIGINT);
+                case "CLASSIFIER":
+                    if (node.getArguments().size() > 1) {
+                        throw semanticException(INVALID_FUNCTION_ARGUMENT, node, "CLASSIFIER pattern recognition function takes no arguments or 1 argument");
+                    }
+                    if (node.getArguments().size() == 1) {
+                        Node argument = node.getArguments().get(0);
+                        if (!(argument instanceof Identifier)) {
+                            throw semanticException(TYPE_MISMATCH, argument, "CLASSIFIER function argument should be primary pattern variable or subset name. Actual: " + argument.getClass().getSimpleName());
+                        }
+                        Identifier identifier = (Identifier) argument;
+                        Optional<Label> label = Label.tryCreateFrom(identifier);
+                        if (label.isEmpty()) {
+                            throw semanticException(INVALID_FUNCTION_ARGUMENT, argument, "%s is not a valid primary pattern variable or subset name", identifier.getValue());
+                        }
+                        if (!context.getContext().getLabels().contains(label.get())) {
+                            throw semanticException(INVALID_FUNCTION_ARGUMENT, argument, "%s is not a primary pattern variable or subset name", identifier.getValue());
+                        }
+                    }
+                    return setExpressionType(node, VARCHAR);
+                default:
+                    throw new IllegalStateException("unexpected pattern recognition function " + node.getName());
+            }
         }
 
         @Override
@@ -1681,7 +1837,7 @@ public class ExpressionAnalyzer
                 fieldToLambdaArgumentDeclaration.put(FieldId.from(resolvedField), lambdaArgument);
             }
 
-            Type returnType = process(node.getBody(), new StackableAstVisitorContext<>(Context.inLambda(lambdaScope, fieldToLambdaArgumentDeclaration.build())));
+            Type returnType = process(node.getBody(), new StackableAstVisitorContext<>(context.getContext().inLambda(lambdaScope, fieldToLambdaArgumentDeclaration.build())));
             FunctionType functionType = new FunctionType(types, returnType);
             return setExpressionType(node, functionType);
         }
@@ -1865,34 +2021,50 @@ public class ExpressionAnalyzer
         // Empty map means that the all lambda expressions surrounding the current node has no arguments.
         private final Map<FieldId, LambdaArgumentDeclaration> fieldToLambdaArgumentDeclaration;
 
+        // Primary row pattern variables and named unions (subsets) of variables
+        // necessary for the analysis of expressions in the context of row pattern recognition
+        private final Set<Label> labels;
+
         private Context(
                 Scope scope,
                 List<Type> functionInputTypes,
-                Map<FieldId, LambdaArgumentDeclaration> fieldToLambdaArgumentDeclaration)
+                Map<FieldId, LambdaArgumentDeclaration> fieldToLambdaArgumentDeclaration,
+                Set<Label> labels)
         {
             this.scope = requireNonNull(scope, "scope is null");
             this.functionInputTypes = functionInputTypes;
             this.fieldToLambdaArgumentDeclaration = fieldToLambdaArgumentDeclaration;
+            this.labels = labels;
         }
 
         public static Context notInLambda(Scope scope)
         {
-            return new Context(scope, null, null);
+            return new Context(scope, null, null, null);
         }
 
-        public static Context inLambda(Scope scope, Map<FieldId, LambdaArgumentDeclaration> fieldToLambdaArgumentDeclaration)
+        public Context inLambda(Scope scope, Map<FieldId, LambdaArgumentDeclaration> fieldToLambdaArgumentDeclaration)
         {
-            return new Context(scope, null, requireNonNull(fieldToLambdaArgumentDeclaration, "fieldToLambdaArgumentDeclaration is null"));
+            return new Context(scope, null, requireNonNull(fieldToLambdaArgumentDeclaration, "fieldToLambdaArgumentDeclaration is null"), labels);
         }
 
         public Context expectingLambda(List<Type> functionInputTypes)
         {
-            return new Context(scope, requireNonNull(functionInputTypes, "functionInputTypes is null"), this.fieldToLambdaArgumentDeclaration);
+            return new Context(scope, requireNonNull(functionInputTypes, "functionInputTypes is null"), this.fieldToLambdaArgumentDeclaration, labels);
         }
 
         public Context notExpectingLambda()
         {
-            return new Context(scope, null, this.fieldToLambdaArgumentDeclaration);
+            return new Context(scope, null, this.fieldToLambdaArgumentDeclaration, labels);
+        }
+
+        public static Context patternRecognition(Scope scope, Set<Label> labels)
+        {
+            return new Context(scope, null, null, requireNonNull(labels, "labels is null"));
+        }
+
+        public Context notExpectingLabels()
+        {
+            return new Context(scope, functionInputTypes, fieldToLambdaArgumentDeclaration, null);
         }
 
         Scope getScope()
@@ -1910,6 +2082,11 @@ public class ExpressionAnalyzer
             return functionInputTypes != null;
         }
 
+        public boolean isPatternRecognition()
+        {
+            return labels != null;
+        }
+
         public Map<FieldId, LambdaArgumentDeclaration> getFieldToLambdaArgumentDeclaration()
         {
             checkState(isInLambda());
@@ -1921,6 +2098,41 @@ public class ExpressionAnalyzer
             checkState(isExpectingLambda());
             return functionInputTypes;
         }
+
+        public Set<Label> getLabels()
+        {
+            checkState(isPatternRecognition());
+            return labels;
+        }
+    }
+
+    public static ExpressionAnalysis analyzePatternRecognitionExpression(
+            Session session,
+            Metadata metadata,
+            GroupProvider groupProvider,
+            AccessControl accessControl,
+            SqlParser sqlParser,
+            Scope scope,
+            Analysis analysis,
+            Expression expression,
+            WarningCollector warningCollector,
+            Set<Label> labels)
+    {
+        ExpressionAnalyzer analyzer = create(analysis, session, metadata, sqlParser, groupProvider, accessControl, TypeProvider.empty(), warningCollector, CorrelationSupport.DISALLOWED);
+        analyzer.analyze(expression, scope, labels);
+
+        updateAnalysis(analysis, analyzer, session, accessControl);
+
+        return new ExpressionAnalysis(
+                analyzer.getExpressionTypes(),
+                analyzer.getExpressionCoercions(),
+                analyzer.getSubqueryInPredicates(),
+                analyzer.getScalarSubqueries(),
+                analyzer.getExistsSubqueries(),
+                analyzer.getColumnReferences(),
+                analyzer.getTypeOnlyCoercions(),
+                analyzer.getQuantifiedComparisons(),
+                analyzer.getWindowFunctions());
     }
 
     public static ExpressionAnalysis analyzeExpressions(
@@ -2031,6 +2243,8 @@ public class ExpressionAnalyzer
         analysis.addLambdaArgumentReferences(analyzer.getLambdaArgumentReferences());
         analysis.addTableColumnReferences(accessControl, session.getIdentity(), analyzer.getTableColumnReferences());
         analysis.addReferencedFields(analyzer.getReferencedFields());
+        analysis.addLabelDereferences(analyzer.getLabelDereferences());
+        analysis.addPatternRecognitionFunctions(analyzer.getPatternRecognitionFunctions());
     }
 
     public static ExpressionAnalyzer create(
@@ -2173,5 +2387,28 @@ public class ExpressionAnalyzer
                 type.equals(SMALLINT) ||
                 type.equals(TINYINT) ||
                 type instanceof DecimalType && ((DecimalType) type).getScale() == 0;
+    }
+
+    public static class LabelPrefixedReference
+    {
+        private final Label label;
+        private final Expression expression;
+
+        public LabelPrefixedReference(Label label, Expression expression)
+        {
+            this.label = requireNonNull(label, "label is null");
+            this.expression = requireNonNull(expression, "expression is null");
+            checkArgument(expression instanceof Identifier || expression instanceof DereferenceExpression, "unexpected expression: " + expression.getClass().getSimpleName());
+        }
+
+        public Label getLabel()
+        {
+            return label;
+        }
+
+        public Expression getExpression()
+        {
+            return expression;
+        }
     }
 }

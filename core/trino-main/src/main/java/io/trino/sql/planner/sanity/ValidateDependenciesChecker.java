@@ -45,6 +45,8 @@ import io.trino.sql.planner.plan.LimitNode;
 import io.trino.sql.planner.plan.MarkDistinctNode;
 import io.trino.sql.planner.plan.OffsetNode;
 import io.trino.sql.planner.plan.OutputNode;
+import io.trino.sql.planner.plan.PatternRecognitionNode;
+import io.trino.sql.planner.plan.PatternRecognitionNode.Measure;
 import io.trino.sql.planner.plan.PlanNode;
 import io.trino.sql.planner.plan.PlanVisitor;
 import io.trino.sql.planner.plan.ProjectNode;
@@ -159,6 +161,39 @@ public final class ValidateDependenciesChecker
             source.accept(this, boundSymbols); // visit child
 
             checkDependencies(source.getOutputSymbols(), node.getDistinctSymbols(), "Invalid node. Mark distinct symbols (%s) not in source plan output (%s)", node.getDistinctSymbols(), source.getOutputSymbols());
+
+            return null;
+        }
+
+        @Override
+        public Void visitPatternRecognition(PatternRecognitionNode node, Set<Symbol> boundSymbols)
+        {
+            PlanNode source = node.getSource();
+            source.accept(this, boundSymbols); // visit child
+
+            Set<Symbol> inputs = createInputs(source, boundSymbols);
+
+            checkDependencies(inputs, node.getPartitionBy(), "Invalid node. Partition by symbols (%s) not in source plan output (%s)", node.getPartitionBy(), node.getSource().getOutputSymbols());
+            if (node.getOrderingScheme().isPresent()) {
+                checkDependencies(
+                        inputs,
+                        node.getOrderingScheme().get().getOrderBy(),
+                        "Invalid node. Order by symbols (%s) not in source plan output (%s)",
+                        node.getOrderingScheme().get().getOrderBy(), node.getSource().getOutputSymbols());
+            }
+
+            Set<Symbol> measuresSymbols = SymbolsExtractor.extractUnique(node.getMeasures().values()
+                    .stream()
+                    .map(Measure::getExpression)
+                    .collect(toImmutableSet()));
+            checkDependencies(inputs, measuresSymbols, "Invalid node. Symbols used in measures (%s) not in source plan output (%s)", measuresSymbols, node.getSource().getOutputSymbols());
+
+            node.getCommonBaseFrame()
+                    .flatMap(WindowNode.Frame::getEndValue)
+                    .ifPresent(symbol -> checkDependencies(inputs, ImmutableSet.of(symbol), "Invalid node. Frame offset symbol (%s) not in source plan output (%s)", symbol, node.getSource().getOutputSymbols()));
+
+            Set<Symbol> variableDefinitionsSymbols = SymbolsExtractor.extractUnique(node.getVariableDefinitions().values());
+            checkDependencies(inputs, variableDefinitionsSymbols, "Invalid node. Symbols used in measures (%s) not in source plan output (%s)", variableDefinitionsSymbols, node.getSource().getOutputSymbols());
 
             return null;
         }
