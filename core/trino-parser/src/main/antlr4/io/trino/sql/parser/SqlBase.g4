@@ -34,6 +34,10 @@ standaloneType
     : type EOF
     ;
 
+standaloneRowPattern
+    : patternAlternation EOF
+    ;
+
 statement
     : query                                                            #statementDefault
     | USE schema=identifier                                            #use
@@ -484,6 +488,42 @@ frameBound
     | expression boundType=(PRECEDING | FOLLOWING)  #boundedFrame
     ;
 
+patternAlternation
+    : patternConcatenation ('|' patternConcatenation)*
+    ;
+
+patternConcatenation
+    : quantifiedPrimary (quantifiedPrimary)*
+    ;
+
+quantifiedPrimary
+    : patternPrimary (patternQuantifier)?
+    ;
+
+patternPrimary
+    :  identifier                                                   #patternVariable
+    | '(' ')'                                                       #emptyPattern
+    | PERMUTE '(' patternAlternation (',' patternAlternation)* ')'  #patternPermutation
+    | '(' patternAlternation ')'                                    #groupedPattern
+    | '^'                                                           #partitionStartAnchor
+    | '$'                                                           #partitionEndAnchor
+    | '{-' patternAlternation '-}'                                  #excludedPattern
+    ;
+
+patternQuantifier
+    : quantifier (QUESTION_MARK)?
+    ;
+
+quantifier
+    : ASTERISK
+    | PLUS
+    | QUESTION_MARK
+    | '{' exactly=INTEGER_VALUE '}'
+    | '{' atLeast=INTEGER_VALUE ',' '}'
+    | '{' atLeast=INTEGER_VALUE ',' atMost=INTEGER_VALUE '}'
+    | '{' ',' atMost=INTEGER_VALUE '}'
+    ;
+
 updateAssignment
     : identifier EQ expression
     ;
@@ -573,7 +613,7 @@ nonReserved
     | MAP | MATCHED | MATERIALIZED | MERGE | MINUTE | MONTH
     | NEXT | NFC | NFD | NFKC | NFKD | NO | NONE | NULLIF | NULLS
     | OFFSET | ONLY | OPTION | ORDINALITY | OUTPUT | OVER
-    | PARTITION | PARTITIONS | PATH | POSITION | PRECEDING | PRECISION | PRIVILEGES | PROPERTIES
+    | PARTITION | PARTITIONS | PATH | PERMUTE | POSITION | PRECEDING | PRECISION | PRIVILEGES | PROPERTIES
     | RANGE | READ | REFRESH | RENAME | REPEATABLE | REPLACE | RESET | RESPECT | RESTRICT | REVOKE | ROLE | ROLES | ROLLBACK | ROW | ROWS
     | SCHEMA | SCHEMAS | SECOND | SECURITY | SERIALIZABLE | SESSION | SET | SETS
     | SHOW | SOME | START | STATS | SUBSTRING | SYSTEM
@@ -718,6 +758,7 @@ OVER: 'OVER';
 PARTITION: 'PARTITION';
 PARTITIONS: 'PARTITIONS';
 PATH: 'PATH';
+PERMUTE: 'PERMUTE';
 POSITION: 'POSITION';
 PRECEDING: 'PRECEDING';
 PRECISION: 'PRECISION';

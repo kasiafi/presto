@@ -916,4 +916,79 @@ public abstract class AstVisitor<R, C>
     {
         return visitStatement(node, context);
     }
+
+    protected R visitRowPattern(RowPattern node, C context)
+    {
+        return visitNode(node, context);
+    }
+
+    protected R visitPatternAlternation(PatternAlternation node, C context)
+    {
+        return visitRowPattern(node, context);
+    }
+
+    protected R visitPatternConcatenation(PatternConcatenation node, C context)
+    {
+        return visitRowPattern(node, context);
+    }
+
+    protected R visitQuantifiedPattern(QuantifiedPattern node, C context)
+    {
+        return visitRowPattern(node, context);
+    }
+
+    protected R visitAnchorPattern(AnchorPattern node, C context)
+    {
+        return visitRowPattern(node, context);
+    }
+
+    protected R visitEmptyPattern(EmptyPattern node, C context)
+    {
+        return visitRowPattern(node, context);
+    }
+
+    protected R visitExcludedPattern(ExcludedPattern node, C context)
+    {
+        return visitRowPattern(node, context);
+    }
+
+    protected R visitPatternPermutation(PatternPermutation node, C context)
+    {
+        return visitRowPattern(node, context);
+    }
+
+    protected R visitGroupedPattern(GroupedPattern node, C context)
+    {
+        return visitRowPattern(node, context);
+    }
+
+    protected R visitPatternVariable(PatternVariable node, C context)
+    {
+        return visitRowPattern(node, context);
+    }
+
+    protected R visitPatternQuantifier(PatternQuantifier node, C context)
+    {
+        return visitNode(node, context);
+    }
+
+    protected R visitZeroOrMoreQuantifier(ZeroOrMoreQuantifier node, C context)
+    {
+        return visitPatternQuantifier(node, context);
+    }
+
+    protected R visitOneOrMoreQuantifier(OneOrMoreQuantifier node, C context)
+    {
+        return visitPatternQuantifier(node, context);
+    }
+
+    protected R visitZeroOrOneQuantifier(ZeroOrOneQuantifier node, C context)
+    {
+        return visitPatternQuantifier(node, context);
+    }
+
+    protected R visitRangeQuantifier(RangeQuantifier node, C context)
+    {
+        return visitPatternQuantifier(node, context);
+    }
 }

@@ -22,6 +22,7 @@ import io.trino.sql.tree.AliasedRelation;
 import io.trino.sql.tree.AllColumns;
 import io.trino.sql.tree.AllRows;
 import io.trino.sql.tree.Analyze;
+import io.trino.sql.tree.AnchorPattern;
 import io.trino.sql.tree.ArithmeticBinaryExpression;
 import io.trino.sql.tree.ArithmeticUnaryExpression;
 import io.trino.sql.tree.ArrayConstructor;
@@ -65,7 +66,9 @@ import io.trino.sql.tree.DropRole;
 import io.trino.sql.tree.DropSchema;
 import io.trino.sql.tree.DropTable;
 import io.trino.sql.tree.DropView;
+import io.trino.sql.tree.EmptyPattern;
 import io.trino.sql.tree.Except;
+import io.trino.sql.tree.ExcludedPattern;
 import io.trino.sql.tree.Execute;
 import io.trino.sql.tree.ExistsPredicate;
 import io.trino.sql.tree.Explain;
@@ -86,6 +89,7 @@ import io.trino.sql.tree.GrantOnType;
 import io.trino.sql.tree.GrantRoles;
 import io.trino.sql.tree.GrantorSpecification;
 import io.trino.sql.tree.GroupBy;
+import io.trino.sql.tree.GroupedPattern;
 import io.trino.sql.tree.GroupingElement;
 import io.trino.sql.tree.GroupingOperation;
 import io.trino.sql.tree.GroupingSets;
@@ -125,18 +129,26 @@ import io.trino.sql.tree.NullIfExpression;
 import io.trino.sql.tree.NullLiteral;
 import io.trino.sql.tree.NumericParameter;
 import io.trino.sql.tree.Offset;
+import io.trino.sql.tree.OneOrMoreQuantifier;
 import io.trino.sql.tree.OrderBy;
 import io.trino.sql.tree.Parameter;
 import io.trino.sql.tree.PathElement;
 import io.trino.sql.tree.PathSpecification;
+import io.trino.sql.tree.PatternAlternation;
+import io.trino.sql.tree.PatternConcatenation;
+import io.trino.sql.tree.PatternPermutation;
+import io.trino.sql.tree.PatternQuantifier;
+import io.trino.sql.tree.PatternVariable;
 import io.trino.sql.tree.Prepare;
 import io.trino.sql.tree.PrincipalSpecification;
 import io.trino.sql.tree.Property;
 import io.trino.sql.tree.QualifiedName;
 import io.trino.sql.tree.QuantifiedComparisonExpression;
+import io.trino.sql.tree.QuantifiedPattern;
 import io.trino.sql.tree.Query;
 import io.trino.sql.tree.QueryBody;
 import io.trino.sql.tree.QuerySpecification;
+import io.trino.sql.tree.RangeQuantifier;
 import io.trino.sql.tree.RefreshMaterializedView;
 import io.trino.sql.tree.Relation;
 import io.trino.sql.tree.RenameColumn;
@@ -150,6 +162,7 @@ import io.trino.sql.tree.Rollback;
 import io.trino.sql.tree.Rollup;
 import io.trino.sql.tree.Row;
 import io.trino.sql.tree.RowDataType;
+import io.trino.sql.tree.RowPattern;
 import io.trino.sql.tree.SampledRelation;
 import io.trino.sql.tree.SearchedCaseExpression;
 import io.trino.sql.tree.Select;
@@ -203,6 +216,8 @@ import io.trino.sql.tree.WindowReference;
 import io.trino.sql.tree.WindowSpecification;
 import io.trino.sql.tree.With;
 import io.trino.sql.tree.WithQuery;
+import io.trino.sql.tree.ZeroOrMoreQuantifier;
+import io.trino.sql.tree.ZeroOrOneQuantifier;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.tree.ParseTree;
@@ -217,6 +232,8 @@ import static com.google.common.collect.Iterables.getOnlyElement;
 import static io.trino.sql.QueryUtil.query;
 import static io.trino.sql.parser.SqlBaseParser.TIME;
 import static io.trino.sql.parser.SqlBaseParser.TIMESTAMP;
+import static io.trino.sql.tree.AnchorPattern.Type.PARTITION_END;
+import static io.trino.sql.tree.AnchorPattern.Type.PARTITION_START;
 import static java.lang.String.format;
 import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
@@ -255,6 +272,12 @@ class AstBuilder
     public Node visitStandalonePathSpecification(SqlBaseParser.StandalonePathSpecificationContext context)
     {
         return visit(context.pathSpecification());
+    }
+
+    @Override
+    public Node visitStandaloneRowPattern(SqlBaseParser.StandaloneRowPatternContext context)
+    {
+        return visit(context.patternAlternation());
     }
 
     // ******************* statements **********************
@@ -2031,6 +2054,107 @@ class AstBuilder
                 .replace("\"\"", "\"");
 
         return new Identifier(getLocation(context), identifier, true);
+    }
+
+    @Override
+    public Node visitPatternAlternation(SqlBaseParser.PatternAlternationContext context)
+    {
+        List<RowPattern> parts = visit(context.patternConcatenation(), RowPattern.class);
+        if (parts.size() > 1) {
+            return new PatternAlternation(getLocation(context), parts);
+        }
+        return parts.get(0);
+    }
+
+    @Override
+    public Node visitPatternConcatenation(SqlBaseParser.PatternConcatenationContext context)
+    {
+        List<RowPattern> parts = visit(context.quantifiedPrimary(), RowPattern.class);
+        if (parts.size() > 1) {
+            return new PatternConcatenation(getLocation(context), parts);
+        }
+        return parts.get(0);
+    }
+
+    @Override
+    public Node visitQuantifiedPrimary(SqlBaseParser.QuantifiedPrimaryContext context)
+    {
+        RowPattern primary = (RowPattern) visit(context.patternPrimary());
+        if (context.patternQuantifier() != null) {
+            return new QuantifiedPattern(getLocation(context), primary, (PatternQuantifier) visit(context.patternQuantifier()));
+        }
+        return primary;
+    }
+
+    @Override
+    public Node visitPatternVariable(SqlBaseParser.PatternVariableContext context)
+    {
+        return new PatternVariable(getLocation(context), (Identifier) visit(context.identifier()));
+    }
+
+    @Override
+    public Node visitEmptyPattern(SqlBaseParser.EmptyPatternContext context)
+    {
+        return new EmptyPattern(getLocation(context));
+    }
+
+    @Override
+    public Node visitPatternPermutation(SqlBaseParser.PatternPermutationContext context)
+    {
+        return new PatternPermutation(getLocation(context), visit(context.patternAlternation(), RowPattern.class));
+    }
+
+    @Override
+    public Node visitGroupedPattern(SqlBaseParser.GroupedPatternContext context)
+    {
+        return new GroupedPattern(getLocation(context), (RowPattern) visit(context.patternAlternation()));
+    }
+
+    @Override
+    public Node visitPartitionStartAnchor(SqlBaseParser.PartitionStartAnchorContext context)
+    {
+        return new AnchorPattern(getLocation(context), PARTITION_START);
+    }
+
+    @Override
+    public Node visitPartitionEndAnchor(SqlBaseParser.PartitionEndAnchorContext context)
+    {
+        return new AnchorPattern(getLocation(context), PARTITION_END);
+    }
+
+    @Override
+    public Node visitExcludedPattern(SqlBaseParser.ExcludedPatternContext context)
+    {
+        return new ExcludedPattern(getLocation(context), (RowPattern) visit(context.patternAlternation()));
+    }
+
+    @Override
+    public Node visitPatternQuantifier(SqlBaseParser.PatternQuantifierContext context)
+    {
+        boolean greedy = context.QUESTION_MARK() == null;
+        if (context.quantifier().ASTERISK() != null) {
+            return new ZeroOrMoreQuantifier(getLocation(context), greedy);
+        }
+        if (context.quantifier().PLUS() != null) {
+            return new OneOrMoreQuantifier(getLocation(context), greedy);
+        }
+        if (context.quantifier().QUESTION_MARK() != null) {
+            return new ZeroOrOneQuantifier(getLocation(context), greedy);
+        }
+
+        Optional<Expression> atLeast = Optional.empty();
+        Optional<Expression> atMost = Optional.empty();
+        if (context.quantifier().exactly != null) {
+            atLeast = Optional.of(new LongLiteral(getLocation(context.quantifier().exactly), context.quantifier().exactly.getText()));
+            atMost = Optional.of(new LongLiteral(getLocation(context.quantifier().exactly), context.quantifier().exactly.getText()));
+        }
+        if (context.quantifier().atLeast != null) {
+            atLeast = Optional.of(new LongLiteral(getLocation(context.quantifier().atLeast), context.quantifier().atLeast.getText()));
+        }
+        if (context.quantifier().atMost != null) {
+            atMost = Optional.of(new LongLiteral(getLocation(context.quantifier().atMost), context.quantifier().atMost.getText()));
+        }
+        return new RangeQuantifier(getLocation(context), greedy, atLeast, atMost);
     }
 
     // ************** literals **************

@@ -89,6 +89,7 @@ import io.trino.sql.tree.Revoke;
 import io.trino.sql.tree.RevokeRoles;
 import io.trino.sql.tree.Rollback;
 import io.trino.sql.tree.Row;
+import io.trino.sql.tree.RowPattern;
 import io.trino.sql.tree.SampledRelation;
 import io.trino.sql.tree.Select;
 import io.trino.sql.tree.SelectItem;
@@ -139,6 +140,7 @@ import static io.trino.sql.ExpressionFormatter.formatGroupBy;
 import static io.trino.sql.ExpressionFormatter.formatOrderBy;
 import static io.trino.sql.ExpressionFormatter.formatStringLiteral;
 import static io.trino.sql.ExpressionFormatter.formatWindowSpecification;
+import static io.trino.sql.RowPatternFormatter.formatPattern;
 import static java.lang.String.format;
 import static java.util.stream.Collectors.joining;
 
@@ -183,6 +185,14 @@ public final class SqlFormatter
         {
             checkArgument(indent == 0, "visitExpression should only be called at root");
             builder.append(formatExpression(node));
+            return null;
+        }
+
+        @Override
+        protected Void visitRowPattern(RowPattern node, Integer indent)
+        {
+            checkArgument(indent == 0, "visitRowPattern should only be called at root");
+            builder.append(formatPattern(node));
             return null;
         }
 

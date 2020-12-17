@@ -22,6 +22,7 @@ import io.trino.sql.tree.AliasedRelation;
 import io.trino.sql.tree.AllColumns;
 import io.trino.sql.tree.AllRows;
 import io.trino.sql.tree.Analyze;
+import io.trino.sql.tree.AnchorPattern;
 import io.trino.sql.tree.ArithmeticBinaryExpression;
 import io.trino.sql.tree.ArrayConstructor;
 import io.trino.sql.tree.AtTimeZone;
@@ -58,6 +59,7 @@ import io.trino.sql.tree.DropRole;
 import io.trino.sql.tree.DropSchema;
 import io.trino.sql.tree.DropTable;
 import io.trino.sql.tree.DropView;
+import io.trino.sql.tree.EmptyPattern;
 import io.trino.sql.tree.Execute;
 import io.trino.sql.tree.ExistsPredicate;
 import io.trino.sql.tree.Explain;
@@ -75,6 +77,7 @@ import io.trino.sql.tree.GrantOnType;
 import io.trino.sql.tree.GrantRoles;
 import io.trino.sql.tree.GrantorSpecification;
 import io.trino.sql.tree.GroupBy;
+import io.trino.sql.tree.GroupedPattern;
 import io.trino.sql.tree.GroupingOperation;
 import io.trino.sql.tree.GroupingSets;
 import io.trino.sql.tree.Identifier;
@@ -106,17 +109,23 @@ import io.trino.sql.tree.NotExpression;
 import io.trino.sql.tree.NullIfExpression;
 import io.trino.sql.tree.NullLiteral;
 import io.trino.sql.tree.Offset;
+import io.trino.sql.tree.OneOrMoreQuantifier;
 import io.trino.sql.tree.OrderBy;
 import io.trino.sql.tree.Parameter;
 import io.trino.sql.tree.PathElement;
 import io.trino.sql.tree.PathSpecification;
+import io.trino.sql.tree.PatternAlternation;
+import io.trino.sql.tree.PatternConcatenation;
+import io.trino.sql.tree.PatternVariable;
 import io.trino.sql.tree.Prepare;
 import io.trino.sql.tree.PrincipalSpecification;
 import io.trino.sql.tree.Property;
 import io.trino.sql.tree.QualifiedName;
 import io.trino.sql.tree.QuantifiedComparisonExpression;
+import io.trino.sql.tree.QuantifiedPattern;
 import io.trino.sql.tree.Query;
 import io.trino.sql.tree.QuerySpecification;
+import io.trino.sql.tree.RangeQuantifier;
 import io.trino.sql.tree.RefreshMaterializedView;
 import io.trino.sql.tree.RenameColumn;
 import io.trino.sql.tree.RenameSchema;
@@ -128,6 +137,7 @@ import io.trino.sql.tree.RevokeRoles;
 import io.trino.sql.tree.Rollback;
 import io.trino.sql.tree.Rollup;
 import io.trino.sql.tree.Row;
+import io.trino.sql.tree.RowPattern;
 import io.trino.sql.tree.SearchedCaseExpression;
 import io.trino.sql.tree.Select;
 import io.trino.sql.tree.SelectItem;
@@ -172,6 +182,8 @@ import io.trino.sql.tree.WindowReference;
 import io.trino.sql.tree.WindowSpecification;
 import io.trino.sql.tree.With;
 import io.trino.sql.tree.WithQuery;
+import io.trino.sql.tree.ZeroOrMoreQuantifier;
+import io.trino.sql.tree.ZeroOrOneQuantifier;
 import org.testng.annotations.Test;
 
 import java.util.ArrayList;
@@ -641,6 +653,39 @@ public class TestSqlParser
                 simpleQuery(
                         selectList(new AllColumns()),
                         subquery(valuesQuery)));
+    }
+
+    @Test
+    public void testRowPattern()
+    {
+        assertRowPattern(
+                "(A B)* | CC+? DD?? E | (F | G)",
+                new PatternAlternation(ImmutableList.of(
+                        new QuantifiedPattern(
+                                new GroupedPattern(
+                                        new PatternConcatenation(ImmutableList.of(
+                                                new PatternVariable(identifier("A")),
+                                                new PatternVariable(identifier("B"))))),
+                                new ZeroOrMoreQuantifier(true)),
+                        new PatternConcatenation(ImmutableList.of(
+                                new QuantifiedPattern(new PatternVariable(identifier("CC")), new OneOrMoreQuantifier(false)),
+                                new QuantifiedPattern(new PatternVariable(identifier("DD")), new ZeroOrOneQuantifier(false)),
+                                new PatternVariable(identifier("E")))),
+                        new GroupedPattern(
+                                new PatternAlternation(ImmutableList.of(
+                                        new PatternVariable(identifier("F")),
+                                        new PatternVariable(identifier("G"))))))));
+
+        assertInvalidRowPattern("A!", "mismatched input '!'.*");
+        assertInvalidRowPattern("A**", "mismatched input '*'.*");
+
+        assertRowPattern("A??", new QuantifiedPattern(new PatternVariable(identifier("A")), new ZeroOrOneQuantifier(false)));
+        assertRowPattern("^$", new PatternConcatenation(ImmutableList.of(new AnchorPattern(AnchorPattern.Type.PARTITION_START), new AnchorPattern(AnchorPattern.Type.PARTITION_END))));
+        assertRowPattern("()", new EmptyPattern());
+        assertRowPattern("A{3}", new QuantifiedPattern(new PatternVariable(identifier("A")), new RangeQuantifier(true, Optional.of(new LongLiteral("3")), Optional.of(new LongLiteral("3")))));
+        assertRowPattern("A{3,}", new QuantifiedPattern(new PatternVariable(identifier("A")), new RangeQuantifier(true, Optional.of(new LongLiteral("3")), Optional.empty())));
+        assertRowPattern("A{,3}", new QuantifiedPattern(new PatternVariable(identifier("A")), new RangeQuantifier(true, Optional.empty(), Optional.of(new LongLiteral("3")))));
+        assertRowPattern("A{3,4}", new QuantifiedPattern(new PatternVariable(identifier("A")), new RangeQuantifier(true, Optional.of(new LongLiteral("3")), Optional.of(new LongLiteral("4")))));
     }
 
     @Test
@@ -2947,6 +2992,28 @@ public class TestSqlParser
         try {
             Expression result = createExpression(expression);
             fail("Expected to throw ParsingException for input:[" + expression + "], but got: " + result);
+        }
+        catch (ParsingException e) {
+            if (!e.getErrorMessage().matches(expectedErrorMessageRegex)) {
+                fail(format("Expected error message to match '%s', but was: '%s'", expectedErrorMessageRegex, e.getErrorMessage()));
+            }
+        }
+    }
+
+    private static void assertRowPattern(String pattern, RowPattern expected)
+    {
+        // compare AST representation
+        assertParsed(pattern, expected, SQL_PARSER.createRowPattern(pattern));
+
+        // assert formatted pattern roundtrip using the expected node as input
+        assertEquals(formatSql(expected), formatSql(SQL_PARSER.createRowPattern(formatSql(expected))));
+    }
+
+    private static void assertInvalidRowPattern(String pattern, String expectedErrorMessageRegex)
+    {
+        try {
+            RowPattern result = SQL_PARSER.createRowPattern(pattern);
+            fail("Expected to throw ParsingException for input:[" + pattern + "], but got: " + result);
         }
         catch (ParsingException e) {
             if (!e.getErrorMessage().matches(expectedErrorMessageRegex)) {
