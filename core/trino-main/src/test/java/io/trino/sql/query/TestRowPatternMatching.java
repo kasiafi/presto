@@ -642,5 +642,46 @@ public class TestRowPatternMatching
                         "     (1, 2, NULL)," +
                         "     (1, 2, NULL)," +
                         "     (1, 2, 'C')");
+
+        // FINAL semantics in MEASURES
+        assertThat(assertions.query("SELECT M.Symbol, /* ticker symbol */ " +
+                "                 M.Classy, /* classifier (label) */ " +
+                "                 M.Bottomp /* bottom price */ " +
+                "          FROM (VALUES " +
+                "                   (1, 1, 10), " +
+                "                   (1, 2, 8), " +
+                "                   (1, 3, 6), " +
+                "                   (1, 4, 8), " +
+                "                   (1, 5, 10), " +
+                "                   (1, 6, 9), " +
+                "                   (1, 7, 8), " +
+                "                   (1, 8, 10) " +
+                "               ) Ticker(Symbol, Tradeday, Price) " +
+                "                 MATCH_RECOGNIZE ( " +
+                "                   PARTITION BY Symbol " +
+                "                   ORDER BY Tradeday " +
+                "                   MEASURES " +
+                "                            match_number() AS Matchno, " +
+                "                            classifier() AS Classy, " +
+                "                            A.Price AS Startp, " +
+                "                            FINAL LAST (Price) AS Bottomp, " +
+                "                            LAST (C.Price) AS Endp " +
+                "                   ALL ROWS PER MATCH " +
+                "                   AFTER MATCH SKIP PAST LAST ROW " +
+                "                   PATTERN (A B+ C+) " +
+                "                   SUBSET " +
+                "                          U = (A, B, C) " +
+                "                   DEFINE /* A defaults to True, matches any row */ " +
+                "                          B AS B.Price < PREV (B.Price) AND PREV(classifier()) = 'A' AND match_number() < 3, " +
+                "                          C AS C.Price > PREV (C.Price) " +
+                "                ) AS M"))
+                .matches("VALUES " +
+                        "     (1, CAST('A' AS varchar), 10)," +
+                        "     (1, 'B', 10)," +
+                        "     (1, 'C', 10)," +
+                        "     (1, 'C', 10)," +
+                        "     (1, 'A', 10)," +
+                        "     (1, 'B', 10)," +
+                        "     (1, 'C', 10)");
     }
 }

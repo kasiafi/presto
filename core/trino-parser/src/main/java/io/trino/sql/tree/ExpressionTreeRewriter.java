@@ -547,7 +547,16 @@ public final class ExpressionTreeRewriter<C>
 
             if (!sameElements(node.getArguments(), arguments) || !sameElements(rewrittenWindow, node.getWindow())
                     || !sameElements(filter, node.getFilter())) {
-                return new FunctionCall(node.getLocation(), node.getName(), rewrittenWindow, filter, node.getOrderBy().map(orderBy -> rewriteOrderBy(orderBy, context)), node.isDistinct(), node.getNullTreatment(), arguments);
+                return new FunctionCall(
+                        node.getLocation(),
+                        node.getName(),
+                        rewrittenWindow,
+                        filter,
+                        node.getOrderBy().map(orderBy -> rewriteOrderBy(orderBy, context)),
+                        node.isDistinct(),
+                        node.getNullTreatment(),
+                        node.getProcessingMode(),
+                        arguments);
             }
             return node;
         }
@@ -1063,7 +1072,7 @@ public final class ExpressionTreeRewriter<C>
 
             Expression argument = rewrite(node.getArgument(), context.get());
             if (node.getArgument() != argument) {
-                return new PatternNavigationFunction(node.getType(), argument, node.getOffset());
+                return new PatternNavigationFunction(node.getType(), argument, node.getOffset(), node.getProcessingMode());
             }
 
             return node;

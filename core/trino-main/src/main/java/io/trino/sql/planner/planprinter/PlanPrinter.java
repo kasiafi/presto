@@ -1419,6 +1419,7 @@ public class PlanPrinter
                         rewritten.getOrderBy(),
                         rewritten.isDistinct(),
                         rewritten.getNullTreatment(),
+                        rewritten.getProcessingMode(),
                         rewritten.getArguments());
             }
         }, expression);

@@ -14,6 +14,7 @@
 package io.trino.sql.tree;
 
 import com.google.common.collect.ImmutableList;
+import io.trino.sql.tree.ProcessingMode.Mode;
 
 import java.util.List;
 import java.util.Objects;
@@ -28,15 +29,16 @@ public class PatternNavigationFunction
     private final Type type;
     private final Expression argument;
     private final long offset;
+    private final Optional<Mode> processingMode;
 
-    public PatternNavigationFunction(Type type, List<Expression> arguments)
+    public PatternNavigationFunction(Type type, List<Expression> arguments, Optional<ProcessingMode> processingMode)
     {
         super(Optional.empty());
         this.type = requireNonNull(type, "type is null");
         checkArgument(arguments.size() > 0 && arguments.size() <= 2, "invalid arguments number: %s. Expected 1 or 2 arguments" + arguments.size());
         this.argument = requireNonNull(arguments.get(0), "argument is null");
         if (arguments.size() == 2) {
-            this.offset = ((LongLiteral) arguments.get(1)).getValue(); //TODO record it in the analysis? like labelDeref is recorded: [noderef -> Identifier name, optional arg0, optional offset]
+            this.offset = ((LongLiteral) arguments.get(1)).getValue(); //TODO record it in the analysis?
         }
         else {
             switch (type) {
@@ -52,15 +54,17 @@ public class PatternNavigationFunction
                     throw new IllegalStateException("unsupported pattern navigation function type " + type);
             }
         }
+        this.processingMode = requireNonNull(processingMode, "processingMode is null").map(ProcessingMode::getMode);
     }
 
-    public PatternNavigationFunction(Type type, Expression argument, long offset)
+    public PatternNavigationFunction(Type type, Expression argument, long offset, Optional<Mode> processingMode)
     {
         super(Optional.empty());
         this.type = requireNonNull(type, "type is null");
         this.argument = requireNonNull(argument, "argument is null");
         checkArgument(offset >= 0, "pattern navigation offset must not be negative (actual: %s)", offset);
         this.offset = offset;
+        this.processingMode = requireNonNull(processingMode, "processingMode is null");
     }
 
     public Type getType()
@@ -76,6 +80,11 @@ public class PatternNavigationFunction
     public long getOffset()
     {
         return offset;
+    }
+
+    public Optional<Mode> getProcessingMode()
+    {
+        return processingMode;
     }
 
     @Override
@@ -102,13 +111,14 @@ public class PatternNavigationFunction
         PatternNavigationFunction that = (PatternNavigationFunction) o;
         return Objects.equals(type, that.type) &&
                 Objects.equals(argument, that.argument) &&
-                Objects.equals(offset, that.offset);
+                Objects.equals(offset, that.offset) &&
+                Objects.equals(processingMode, that.processingMode);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(type, argument, offset);
+        return Objects.hash(type, argument, offset, processingMode);
     }
 
     public enum Type

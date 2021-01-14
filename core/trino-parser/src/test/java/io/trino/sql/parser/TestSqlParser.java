@@ -119,6 +119,7 @@ import io.trino.sql.tree.PatternConcatenation;
 import io.trino.sql.tree.PatternVariable;
 import io.trino.sql.tree.Prepare;
 import io.trino.sql.tree.PrincipalSpecification;
+import io.trino.sql.tree.ProcessingMode;
 import io.trino.sql.tree.Property;
 import io.trino.sql.tree.QualifiedName;
 import io.trino.sql.tree.QuantifiedComparisonExpression;
@@ -222,6 +223,8 @@ import static io.trino.sql.tree.ArithmeticUnaryExpression.negative;
 import static io.trino.sql.tree.ArithmeticUnaryExpression.positive;
 import static io.trino.sql.tree.DateTimeDataType.Type.TIMESTAMP;
 import static io.trino.sql.tree.FrameBound.Type.CURRENT_ROW;
+import static io.trino.sql.tree.ProcessingMode.Mode.FINAL;
+import static io.trino.sql.tree.ProcessingMode.Mode.RUNNING;
 import static io.trino.sql.tree.SortItem.NullOrdering.UNDEFINED;
 import static io.trino.sql.tree.SortItem.Ordering.ASCENDING;
 import static io.trino.sql.tree.SortItem.Ordering.DESCENDING;
@@ -2511,6 +2514,7 @@ public class TestSqlParser
                                 Optional.empty(),
                                 false,
                                 Optional.empty(),
+                                Optional.empty(),
                                 ImmutableList.of(new Identifier("x"))))));
     }
 
@@ -2549,6 +2553,7 @@ public class TestSqlParser
                         Optional.of(new OrderBy(ImmutableList.of(new SortItem(identifier("x"), DESCENDING, UNDEFINED)))),
                         false,
                         Optional.empty(),
+                        Optional.empty(),
                         ImmutableList.of(identifier("x"))));
         assertStatement("SELECT array_agg(x ORDER BY t.y) FROM t",
                 simpleQuery(
@@ -2559,6 +2564,7 @@ public class TestSqlParser
                                 Optional.empty(),
                                 Optional.of(new OrderBy(ImmutableList.of(new SortItem(new DereferenceExpression(new Identifier("t"), identifier("y")), ASCENDING, UNDEFINED)))),
                                 false,
+                                Optional.empty(),
                                 Optional.empty(),
                                 ImmutableList.of(new Identifier("x")))),
                         table(QualifiedName.of("t"))));
@@ -2827,6 +2833,7 @@ public class TestSqlParser
                         Optional.empty(),
                         false,
                         Optional.of(NullTreatment.IGNORE),
+                        Optional.empty(),
                         ImmutableList.of(new Identifier("x"), new LongLiteral("1"))));
         assertExpression("lead(x, 1) respect nulls over()",
                 new FunctionCall(
@@ -2837,6 +2844,34 @@ public class TestSqlParser
                         Optional.empty(),
                         false,
                         Optional.of(NullTreatment.RESPECT),
+                        Optional.empty(),
+                        ImmutableList.of(new Identifier("x"), new LongLiteral("1"))));
+    }
+
+    @Test
+    public void testProcessingMode()
+    {
+        assertExpression("RUNNING LAST(x, 1)",
+                new FunctionCall(
+                        Optional.empty(),
+                        QualifiedName.of("LAST"),
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        false,
+                        Optional.empty(),
+                        Optional.of(new ProcessingMode(Optional.empty(), RUNNING)),
+                        ImmutableList.of(new Identifier("x"), new LongLiteral("1"))));
+        assertExpression("FINAL FIRST(x, 1)",
+                new FunctionCall(
+                        Optional.empty(),
+                        QualifiedName.of("FIRST"),
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        false,
+                        Optional.empty(),
+                        Optional.of(new ProcessingMode(Optional.empty(), FINAL)),
                         ImmutableList.of(new Identifier("x"), new LongLiteral("1"))));
     }
 
@@ -2851,6 +2886,7 @@ public class TestSqlParser
                         Optional.empty(),
                         Optional.empty(),
                         false,
+                        Optional.empty(),
                         Optional.empty(),
                         ImmutableList.of()));
 
@@ -2867,6 +2903,7 @@ public class TestSqlParser
                         Optional.empty(),
                         false,
                         Optional.empty(),
+                        Optional.empty(),
                         ImmutableList.of()));
 
         assertExpression("rank() OVER (PARTITION BY x ORDER BY y ROWS CURRENT ROW)",
@@ -2881,6 +2918,7 @@ public class TestSqlParser
                         Optional.empty(),
                         Optional.empty(),
                         false,
+                        Optional.empty(),
                         Optional.empty(),
                         ImmutableList.of()));
     }

@@ -144,6 +144,7 @@ import io.trino.sql.tree.PatternRecognitionRelation.RowsPerMatch;
 import io.trino.sql.tree.PatternVariable;
 import io.trino.sql.tree.Prepare;
 import io.trino.sql.tree.PrincipalSpecification;
+import io.trino.sql.tree.ProcessingMode;
 import io.trino.sql.tree.Property;
 import io.trino.sql.tree.QualifiedName;
 import io.trino.sql.tree.QuantifiedComparisonExpression;
@@ -245,6 +246,8 @@ import static io.trino.sql.tree.PatternRecognitionRelation.RowsPerMatch.ALL_OMIT
 import static io.trino.sql.tree.PatternRecognitionRelation.RowsPerMatch.ALL_SHOW_EMPTY;
 import static io.trino.sql.tree.PatternRecognitionRelation.RowsPerMatch.ALL_WITH_UNMATCHED;
 import static io.trino.sql.tree.PatternRecognitionRelation.RowsPerMatch.ONE;
+import static io.trino.sql.tree.ProcessingMode.Mode.FINAL;
+import static io.trino.sql.tree.ProcessingMode.Mode.RUNNING;
 import static io.trino.sql.tree.SkipTo.skipPastLastRow;
 import static io.trino.sql.tree.SkipTo.skipToFirst;
 import static io.trino.sql.tree.SkipTo.skipToLast;
@@ -1957,11 +1960,14 @@ class AstBuilder
 
         SqlBaseParser.NullTreatmentContext nullTreatment = context.nullTreatment();
 
+        SqlBaseParser.ProcessingModeContext processingMode = context.processingMode();
+
         if (name.toString().equalsIgnoreCase("if")) {
             check(context.expression().size() == 2 || context.expression().size() == 3, "Invalid number of arguments for 'if' function", context);
             check(!window.isPresent(), "OVER clause not valid for 'if' function", context);
             check(!distinct, "DISTINCT not valid for 'if' function", context);
             check(nullTreatment == null, "Null treatment clause not valid for 'if' function", context);
+            check(processingMode == null, "Running or final semantics not valid for 'if' function", context);
             check(!filter.isPresent(), "FILTER not valid for 'if' function", context);
 
             Expression elseExpression = null;
@@ -1981,6 +1987,7 @@ class AstBuilder
             check(!window.isPresent(), "OVER clause not valid for 'nullif' function", context);
             check(!distinct, "DISTINCT not valid for 'nullif' function", context);
             check(nullTreatment == null, "Null treatment clause not valid for 'nullif' function", context);
+            check(processingMode == null, "Running or final semantics not valid for 'nullif' function", context);
             check(!filter.isPresent(), "FILTER not valid for 'nullif' function", context);
 
             return new NullIfExpression(
@@ -1994,6 +2001,7 @@ class AstBuilder
             check(!window.isPresent(), "OVER clause not valid for 'coalesce' function", context);
             check(!distinct, "DISTINCT not valid for 'coalesce' function", context);
             check(nullTreatment == null, "Null treatment clause not valid for 'coalesce' function", context);
+            check(processingMode == null, "Running or final semantics not valid for 'coalesce' function", context);
             check(!filter.isPresent(), "FILTER not valid for 'coalesce' function", context);
 
             return new CoalesceExpression(getLocation(context), visit(context.expression(), Expression.class));
@@ -2004,6 +2012,7 @@ class AstBuilder
             check(!window.isPresent(), "OVER clause not valid for 'try' function", context);
             check(!distinct, "DISTINCT not valid for 'try' function", context);
             check(nullTreatment == null, "Null treatment clause not valid for 'try' function", context);
+            check(processingMode == null, "Running or final semantics not valid for 'try' function", context);
             check(!filter.isPresent(), "FILTER not valid for 'try' function", context);
 
             return new TryExpression(getLocation(context), (Expression) visit(getOnlyElement(context.expression())));
@@ -2014,6 +2023,7 @@ class AstBuilder
             check(!window.isPresent(), "OVER clause not valid for 'format' function", context);
             check(!distinct, "DISTINCT not valid for 'format' function", context);
             check(nullTreatment == null, "Null treatment clause not valid for 'format' function", context);
+            check(processingMode == null, "Running or final semantics not valid for 'format' function", context);
             check(!filter.isPresent(), "FILTER not valid for 'format' function", context);
 
             return new Format(getLocation(context), visit(context.expression(), Expression.class));
@@ -2024,6 +2034,7 @@ class AstBuilder
             check(!window.isPresent(), "OVER clause not valid for '$internal$bind' function", context);
             check(!distinct, "DISTINCT not valid for '$internal$bind' function", context);
             check(nullTreatment == null, "Null treatment clause not valid for '$internal$bind' function", context);
+            check(processingMode == null, "Running or final semantics not valid for '$internal$bind' function", context);
             check(!filter.isPresent(), "FILTER not valid for '$internal$bind' function", context);
 
             int numValues = context.expression().size() - 1;
@@ -2048,6 +2059,16 @@ class AstBuilder
             }
         }
 
+        Optional<ProcessingMode> mode = Optional.empty();
+        if (processingMode != null) {
+            if (processingMode.RUNNING() != null) {
+                mode = Optional.of(new ProcessingMode(getLocation(processingMode), RUNNING));
+            }
+            else if (processingMode.FINAL() != null) {
+                mode = Optional.of(new ProcessingMode(getLocation(processingMode), FINAL));
+            }
+        }
+
         return new FunctionCall(
                 Optional.of(getLocation(context)),
                 name,
@@ -2056,6 +2077,7 @@ class AstBuilder
                 orderBy,
                 distinct,
                 nulls,
+                mode,
                 visit(context.expression(), Expression.class));
     }
 

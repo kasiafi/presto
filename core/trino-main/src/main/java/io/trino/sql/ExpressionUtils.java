@@ -35,6 +35,8 @@ import io.trino.sql.tree.LogicalBinaryExpression.Operator;
 import io.trino.sql.tree.LongLiteral;
 import io.trino.sql.tree.MatchNumberFunction;
 import io.trino.sql.tree.PatternNavigationFunction;
+import io.trino.sql.tree.PatternNavigationFunction.Type;
+import io.trino.sql.tree.ProcessingMode;
 import io.trino.sql.tree.RowDataType;
 import io.trino.sql.tree.SymbolReference;
 
@@ -354,7 +356,11 @@ public final class ExpressionUtils
                     case "LAST":
                     case "PREV":
                     case "NEXT":
-                        return new PatternNavigationFunction(PatternNavigationFunction.Type.from(functionName), treeRewriter.rewrite(node.getArguments().get(0), context), ((LongLiteral) node.getArguments().get(1)).getValue());
+                        return new PatternNavigationFunction(
+                                Type.from(functionName),
+                                treeRewriter.rewrite(node.getArguments().get(0), context),
+                                ((LongLiteral) node.getArguments().get(1)).getValue(),
+                                node.getProcessingMode().map(ProcessingMode::getMode));
                     case "CLASSIFIER":
                         if (node.getArguments().isEmpty()) {
                             return new ClassifierFunction(Optional.empty());

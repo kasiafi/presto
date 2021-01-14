@@ -367,6 +367,11 @@ public final class ExpressionFormatter
         {
             StringBuilder builder = new StringBuilder();
 
+            if (node.getProcessingMode().isPresent()) {
+                builder.append(node.getProcessingMode().get().getMode())
+                        .append(" ");
+            }
+
             String arguments = joinExpressions(node.getArguments());
             if (node.getArguments().isEmpty() && "count".equalsIgnoreCase(node.getName().getSuffix())) {
                 arguments = "*";
@@ -753,7 +758,21 @@ public final class ExpressionFormatter
         @Override
         protected String visitPatternNavigationFunction(PatternNavigationFunction node, Void context)
         {
-            return node.getType() + "(" + process(node.getArgument()) + ", " + node.getOffset() + ")";
+            StringBuilder builder = new StringBuilder();
+
+            if (node.getProcessingMode().isPresent()) {
+                builder.append(node.getProcessingMode().get())
+                        .append(" ");
+            }
+
+            builder.append(node.getType())
+                    .append("(")
+                    .append(process(node.getArgument()))
+                    .append(", ")
+                    .append(node.getOffset())
+                    .append(")");
+
+            return builder.toString();
         }
 
         @Override

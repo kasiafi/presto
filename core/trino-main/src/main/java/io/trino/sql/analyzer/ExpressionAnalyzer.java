@@ -103,6 +103,7 @@ import io.trino.sql.tree.NullIfExpression;
 import io.trino.sql.tree.NullLiteral;
 import io.trino.sql.tree.OrderBy;
 import io.trino.sql.tree.Parameter;
+import io.trino.sql.tree.ProcessingMode;
 import io.trino.sql.tree.QualifiedName;
 import io.trino.sql.tree.QuantifiedComparisonExpression;
 import io.trino.sql.tree.Row;
@@ -147,6 +148,7 @@ import static io.trino.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT;
 import static io.trino.spi.StandardErrorCode.INVALID_LITERAL;
 import static io.trino.spi.StandardErrorCode.INVALID_ORDER_BY;
 import static io.trino.spi.StandardErrorCode.INVALID_PARAMETER_USAGE;
+import static io.trino.spi.StandardErrorCode.INVALID_PROCESSING_MODE;
 import static io.trino.spi.StandardErrorCode.INVALID_WINDOW_FRAME;
 import static io.trino.spi.StandardErrorCode.MISSING_ORDER_BY;
 import static io.trino.spi.StandardErrorCode.NESTED_WINDOW;
@@ -1038,6 +1040,15 @@ public class ExpressionAnalyzer
             if (context.getContext().isPatternRecognition() && metadata.isAggregationFunction(node.getName())) {
                 throw semanticException(NOT_SUPPORTED, node, "Aggregations in pattern recognition context are not yet supported");
             }
+            if (node.getProcessingMode().isPresent()) {
+                ProcessingMode processingMode = node.getProcessingMode().get();
+                if (!context.getContext().isPatternRecognition()) {
+                    throw semanticException(INVALID_PROCESSING_MODE, processingMode, "%s semantics is not supported out of pattern recognition context", processingMode.getMode());
+                }
+                if (!metadata.isAggregationFunction(node.getName())) {
+                    throw semanticException(INVALID_PROCESSING_MODE, processingMode, "%s semantics is supported only for FIRST(), LAST() and aggregation functions. Actual: %s", processingMode.getMode(), node.getName());
+                }
+            }
 
             if (node.getWindow().isPresent()) {
                 ResolvedWindow window = getResolvedWindow.apply(node);
@@ -1385,10 +1396,15 @@ public class ExpressionAnalyzer
             if (node.isDistinct()) {
                 throw semanticException(NOT_SUPPORTED, node, "Cannot use DISTINCT with %s pattern recognition function", node.getName());
             }
+            String name = node.getName().getSuffix();
+            if (node.getProcessingMode().isPresent()) {
+                ProcessingMode processingMode = node.getProcessingMode().get();
+                if (!name.equalsIgnoreCase("FIRST") && !name.equalsIgnoreCase("LAST")) {
+                    throw semanticException(NOT_SUPPORTED, processingMode, "%s semantics is not supported with %s pattern recognition function", processingMode.getMode(), node.getName());
+                }
+            }
 
             patternRecognitionFunctions.add(NodeRef.of(node));
-
-            String name = node.getName().getSuffix();
 
             switch (name.toUpperCase(ENGLISH)) {
                 case "FIRST":

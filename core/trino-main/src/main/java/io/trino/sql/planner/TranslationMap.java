@@ -222,8 +222,10 @@ class TranslationMap
                     List<Expression> rewrittenArguments = node.getArguments().stream()
                             .map(argument -> treeRewriter.rewrite(argument, null))
                             .collect(toImmutableList());
-                    return coerceIfNecessary(node, patternRecognitionFunction(node.getName(), rewrittenArguments));
+                    return coerceIfNecessary(node, patternRecognitionFunction(node, rewrittenArguments));
                 }
+
+                // TODO handle aggregation in pattern recognition context (and handle its processingMode)
 
                 Optional<Expression> mapped = tryGetMapping(node);
                 if (mapped.isPresent()) {
@@ -242,12 +244,14 @@ class TranslationMap
                         rewritten.getOrderBy(),
                         rewritten.isDistinct(),
                         rewritten.getNullTreatment(),
+                        rewritten.getProcessingMode(),
                         rewritten.getArguments());
                 return coerceIfNecessary(node, rewritten);
             }
 
-            private Expression patternRecognitionFunction(QualifiedName name, List<Expression> arguments)
+            private Expression patternRecognitionFunction(FunctionCall node, List<Expression> arguments)
             {
+                QualifiedName name = node.getName();
                 checkArgument(name.getParts().size() == 1, "unexpected pattern recognition function name: " + name);
                 String functionName = name.getSuffix().toUpperCase(ENGLISH);
                 switch (functionName) {
@@ -255,7 +259,7 @@ class TranslationMap
                     case "LAST":
                     case "PREV":
                     case "NEXT":
-                        return new PatternNavigationFunction(Type.from(functionName), arguments); //TODO do not rewrite the offset argument but immediately get the value (or record it during analysis and get it from analysis)
+                        return new PatternNavigationFunction(Type.from(functionName), arguments, node.getProcessingMode()); //TODO do not rewrite the offset argument but immediately get the value (or record it during analysis and get it from analysis)
                     case "CLASSIFIER":
                         checkState(arguments.size() < 2, "unexpected arguments for CLASSIFIER function: " + arguments);
                         if (arguments.isEmpty()) {

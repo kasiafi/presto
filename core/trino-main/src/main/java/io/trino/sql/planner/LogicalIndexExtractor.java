@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static io.trino.sql.tree.ProcessingMode.Mode.FINAL;
 import static java.lang.Math.toIntExact;
 import static java.util.Objects.requireNonNull;
 
@@ -96,9 +97,11 @@ public class LogicalIndexExtractor
                 case NEXT:
                     return treeRewriter.rewrite(node.getArgument(), context.withPhysicalOffset(toIntExact(node.getOffset())));
                 case FIRST:
-                    return treeRewriter.rewrite(node.getArgument(), context.withLogicalOffset(false, toIntExact(node.getOffset())));
+                    boolean running = node.getProcessingMode().isEmpty() || node.getProcessingMode().get() != FINAL;
+                    return treeRewriter.rewrite(node.getArgument(), context.withLogicalOffset(running, false, toIntExact(node.getOffset())));
                 case LAST:
-                    return treeRewriter.rewrite(node.getArgument(), context.withLogicalOffset(true, toIntExact(node.getOffset())));
+                    running = node.getProcessingMode().isEmpty() || node.getProcessingMode().get() != FINAL;
+                    return treeRewriter.rewrite(node.getArgument(), context.withLogicalOffset(running, true, toIntExact(node.getOffset())));
                 default:
                     throw new IllegalStateException("unsupported pattern navigation function type: " + node.getType());
             }
@@ -163,15 +166,17 @@ public class LogicalIndexExtractor
     private static class LogicalIndexContext
     {
         private final Set<Label> label;
+        private final boolean running;
         private final boolean last;
         private final int logicalOffset;
         private final int physicalOffset;
 
-        public static final LogicalIndexContext DEFAULT = new LogicalIndexContext(ImmutableSet.of(), true, 0, 0);
+        public static final LogicalIndexContext DEFAULT = new LogicalIndexContext(ImmutableSet.of(), true, true, 0, 0);
 
-        private LogicalIndexContext(Set<Label> label, boolean last, int logicalOffset, int physicalOffset)
+        private LogicalIndexContext(Set<Label> label, boolean running, boolean last, int logicalOffset, int physicalOffset)
         {
             this.label = requireNonNull(label, "label is null");
+            this.running = running;
             this.last = last;
             this.logicalOffset = logicalOffset;
             this.physicalOffset = physicalOffset;
@@ -179,22 +184,22 @@ public class LogicalIndexExtractor
 
         public LogicalIndexContext withPhysicalOffset(int physicalOffset)
         {
-            return new LogicalIndexContext(this.label, this.last, this.logicalOffset, physicalOffset);
+            return new LogicalIndexContext(this.label, this.running, this.last, this.logicalOffset, physicalOffset);
         }
 
-        public LogicalIndexContext withLogicalOffset(boolean last, int logicalOffset)
+        public LogicalIndexContext withLogicalOffset(boolean running, boolean last, int logicalOffset)
         {
-            return new LogicalIndexContext(this.label, last, logicalOffset, this.physicalOffset);
+            return new LogicalIndexContext(this.label, running, last, logicalOffset, this.physicalOffset);
         }
 
         public LogicalIndexContext withLabels(Set<Label> labels)
         {
-            return new LogicalIndexContext(labels, this.last, this.logicalOffset, this.physicalOffset);
+            return new LogicalIndexContext(labels, this.running, this.last, this.logicalOffset, this.physicalOffset);
         }
 
         public LogicalIndexPointer toLogicalIndexPointer()
         {
-            return new LogicalIndexPointer(label, last, true, logicalOffset, physicalOffset);
+            return new LogicalIndexPointer(label, last, running, logicalOffset, physicalOffset);
         }
     }
 
