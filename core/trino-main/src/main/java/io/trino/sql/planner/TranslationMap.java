@@ -38,6 +38,7 @@ import io.trino.sql.tree.NodeRef;
 import io.trino.sql.tree.Parameter;
 import io.trino.sql.tree.PatternNavigationFunction;
 import io.trino.sql.tree.PatternNavigationFunction.Type;
+import io.trino.sql.tree.ProcessingMode;
 import io.trino.sql.tree.QualifiedName;
 import io.trino.sql.tree.RowDataType;
 import io.trino.sql.tree.SymbolReference;
@@ -259,7 +260,8 @@ class TranslationMap
                     case "LAST":
                     case "PREV":
                     case "NEXT":
-                        return new PatternNavigationFunction(Type.from(functionName), arguments, node.getProcessingMode()); //TODO do not rewrite the offset argument but immediately get the value (or record it during analysis and get it from analysis)
+                        checkState(arguments.size() > 0 && arguments.size() <= 2, "invalid arguments for pattern navigation function " + name);
+                        return new PatternNavigationFunction(Type.from(functionName), arguments.get(0), analysis.getNavigationOffset(node), node.getProcessingMode().map(ProcessingMode::getMode));
                     case "CLASSIFIER":
                         checkState(arguments.size() < 2, "unexpected arguments for CLASSIFIER function: " + arguments);
                         if (arguments.isEmpty()) {

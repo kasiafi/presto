@@ -261,6 +261,8 @@ public class ExpressionAnalyzer
     private final Map<NodeRef<DereferenceExpression>, LabelPrefixedReference> labelDereferences = new LinkedHashMap<>();
     // Record functions specific to row pattern recognition context
     private final Set<NodeRef<FunctionCall>> patternRecognitionFunctions = new LinkedHashSet<>();
+    // Record logical and physical offsets of row pattern navigation functions
+    private final Map<NodeRef<FunctionCall>, Long> navigationOffsets = new LinkedHashMap<>();
 
     private final Session session;
     private final Map<NodeRef<Parameter>, Expression> parameters;
@@ -428,6 +430,11 @@ public class ExpressionAnalyzer
     public Set<NodeRef<FunctionCall>> getPatternRecognitionFunctions()
     {
         return patternRecognitionFunctions;
+    }
+
+    public Map<NodeRef<FunctionCall>, Long> getNavigationOffsets()
+    {
+        return navigationOffsets;
     }
 
     private class Visitor
@@ -1428,6 +1435,7 @@ public class ExpressionAnalyzer
                         if (offset > Integer.MAX_VALUE) {
                             throw semanticException(NUMERIC_VALUE_OUT_OF_RANGE, node, "The second argument of %s pattern recognition navigation function must not exceed %s (actual: %s)", node.getName(), Integer.MAX_VALUE, offset);
                         }
+                        navigationOffsets.put(NodeRef.of(node), offset);
                     }
                     // TODO check consistent label inside
                     // TODO check nesting of navigation functions --> immediate nesting required!
@@ -2261,6 +2269,7 @@ public class ExpressionAnalyzer
         analysis.addReferencedFields(analyzer.getReferencedFields());
         analysis.addLabelDereferences(analyzer.getLabelDereferences());
         analysis.addPatternRecognitionFunctions(analyzer.getPatternRecognitionFunctions());
+        analysis.addNavigationOffsets(analyzer.getNavigationOffsets());
     }
 
     public static ExpressionAnalyzer create(

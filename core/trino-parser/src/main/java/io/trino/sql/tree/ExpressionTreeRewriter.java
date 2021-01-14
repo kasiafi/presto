@@ -19,6 +19,7 @@ import com.google.common.collect.Iterables;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 import static com.google.common.collect.ImmutableList.toImmutableList;
 
@@ -1072,7 +1073,7 @@ public final class ExpressionTreeRewriter<C>
 
             Expression argument = rewrite(node.getArgument(), context.get());
             if (node.getArgument() != argument) {
-                return new PatternNavigationFunction(node.getType(), argument, node.getOffset(), node.getProcessingMode());
+                return new PatternNavigationFunction(node.getType(), argument, OptionalLong.of(node.getOffset()), node.getProcessingMode());
             }
 
             return node;

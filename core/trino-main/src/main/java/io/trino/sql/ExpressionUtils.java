@@ -46,6 +46,7 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Queue;
 import java.util.Set;
 import java.util.function.Function;
@@ -359,7 +360,7 @@ public final class ExpressionUtils
                         return new PatternNavigationFunction(
                                 Type.from(functionName),
                                 treeRewriter.rewrite(node.getArguments().get(0), context),
-                                ((LongLiteral) node.getArguments().get(1)).getValue(),
+                                OptionalLong.of(((LongLiteral) node.getArguments().get(1)).getValue()),
                                 node.getProcessingMode().map(ProcessingMode::getMode));
                     case "CLASSIFIER":
                         if (node.getArguments().isEmpty()) {

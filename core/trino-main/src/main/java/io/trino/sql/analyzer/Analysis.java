@@ -130,6 +130,7 @@ public class Analysis
     private final Map<NodeRef<DereferenceExpression>, LabelPrefixedReference> labelDereferences = new LinkedHashMap<>();
 
     private final Set<NodeRef<FunctionCall>> patternRecognitionFunctions = new LinkedHashSet<>();
+    private final Map<NodeRef<FunctionCall>, Long> navigationOffsets = new LinkedHashMap<>();
 
     private final Map<NodeRef<QuerySpecification>, List<FunctionCall>> aggregates = new LinkedHashMap<>();
     private final Map<NodeRef<OrderBy>, List<Expression>> orderByAggregates = new LinkedHashMap<>();
@@ -869,6 +870,16 @@ public class Analysis
     public boolean isPatternRecognitionFunction(FunctionCall functionCall)
     {
         return patternRecognitionFunctions.contains(NodeRef.of(functionCall));
+    }
+
+    public void addNavigationOffsets(Map<NodeRef<FunctionCall>, Long> offsets)
+    {
+        navigationOffsets.putAll(offsets);
+    }
+
+    public OptionalLong getNavigationOffset(FunctionCall functionCall)
+    {
+        return Optional.ofNullable(navigationOffsets.get(NodeRef.of(functionCall))).map(OptionalLong::of).orElse(OptionalLong.empty());
     }
 
     public Map<AccessControlInfo, Map<QualifiedObjectName, Set<String>>> getTableColumnReferences()
