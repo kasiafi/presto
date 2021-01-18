@@ -18,6 +18,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Multimap;
+import com.google.common.collect.Streams;
 import io.airlift.slice.SliceUtf8;
 import io.trino.Session;
 import io.trino.execution.warnings.WarningCollector;
@@ -140,12 +141,15 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Verify.verify;
 import static com.google.common.collect.ImmutableList.toImmutableList;
+import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static io.trino.spi.StandardErrorCode.COLUMN_NOT_FOUND;
 import static io.trino.spi.StandardErrorCode.EXPRESSION_NOT_CONSTANT;
 import static io.trino.spi.StandardErrorCode.FUNCTION_NOT_AGGREGATE;
+import static io.trino.spi.StandardErrorCode.INVALID_ARGUMENTS;
 import static io.trino.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT;
 import static io.trino.spi.StandardErrorCode.INVALID_LITERAL;
+import static io.trino.spi.StandardErrorCode.INVALID_NAVIGATION_NESTING;
 import static io.trino.spi.StandardErrorCode.INVALID_ORDER_BY;
 import static io.trino.spi.StandardErrorCode.INVALID_PARAMETER_USAGE;
 import static io.trino.spi.StandardErrorCode.INVALID_PROCESSING_MODE;
@@ -181,6 +185,7 @@ import static io.trino.spi.type.VarbinaryType.VARBINARY;
 import static io.trino.spi.type.VarcharType.VARCHAR;
 import static io.trino.sql.NodeUtils.getSortItemsFromOrderBy;
 import static io.trino.sql.analyzer.Analyzer.verifyNoAggregateWindowOrGroupingFunctions;
+import static io.trino.sql.analyzer.ExpressionTreeUtils.extractExpressions;
 import static io.trino.sql.analyzer.ExpressionTreeUtils.extractLocation;
 import static io.trino.sql.analyzer.ExpressionTreeUtils.extractWindowFunctions;
 import static io.trino.sql.analyzer.SemanticExceptions.missingAttributeException;
@@ -1437,8 +1442,9 @@ public class ExpressionAnalyzer
                         }
                         navigationOffsets.put(NodeRef.of(node), offset);
                     }
-                    // TODO check consistent label inside
-                    // TODO check nesting of navigation functions --> immediate nesting required!
+                    validateNavigationNesting(node);
+                    // must run after the argument is processed
+                    validateLabelConsistency(node);
                     return setExpressionType(node, resultType);
                 case "MATCH_NUMBER":
                     if (node.getArguments().size() != 0) {
@@ -1467,6 +1473,138 @@ public class ExpressionAnalyzer
                 default:
                     throw new IllegalStateException("unexpected pattern recognition function " + node.getName());
             }
+        }
+
+        private void validateNavigationNesting(FunctionCall node)
+        {
+            checkArgument(isPatternNavigationFunction(node));
+            String name = node.getName().getSuffix();
+
+            // It is allowed to nest FIRST and LAST functions within PREV and NEXT functions. Only immediate nesting is supported
+            List<FunctionCall> nestedNavigationFunctions = extractExpressions(ImmutableList.of(node.getArguments().get(0)), FunctionCall.class).stream()
+                    .filter(this::isPatternNavigationFunction)
+                    .collect(toImmutableList());
+            if (!nestedNavigationFunctions.isEmpty()) {
+                if (name.equalsIgnoreCase("FIRST") || name.equalsIgnoreCase("LAST")) {
+                    throw semanticException(
+                            INVALID_NAVIGATION_NESTING,
+                            nestedNavigationFunctions.get(0),
+                            "Cannot nest %s pattern navigation function inside %s pattern navigation function", nestedNavigationFunctions.get(0).getName(), name);
+                }
+                if (nestedNavigationFunctions.size() > 1) {
+                    throw semanticException(
+                            INVALID_NAVIGATION_NESTING,
+                            nestedNavigationFunctions.get(1),
+                            "Cannot nest multiple pattern navigation functions inside %s pattern navigation function", name);
+                }
+                FunctionCall nested = getOnlyElement(nestedNavigationFunctions);
+                String nestedName = nested.getName().getSuffix();
+                if (nestedName.equalsIgnoreCase("PREV") || nestedName.equalsIgnoreCase("NEXT")) {
+                    throw semanticException(
+                            INVALID_NAVIGATION_NESTING,
+                            nested,
+                            "Cannot nest %s pattern navigation function inside %s pattern navigation function", nestedName, name);
+                }
+                if (nested != node.getArguments().get(0)) {
+                    throw semanticException(
+                            INVALID_NAVIGATION_NESTING,
+                            nested,
+                            "Immediate nesting is required for pattern navigation functions");
+                }
+            }
+        }
+
+        private void validateLabelConsistency(FunctionCall node)
+        {
+            checkArgument(isPatternNavigationFunction(node));
+            String name = node.getName().getSuffix();
+
+            // Pattern navigation function must contain at least one column reference or CLASSIFIER() function
+            List<Expression> unlabeledInputColumns = Streams.concat(
+                    extractExpressions(ImmutableList.of(node.getArguments().get(0)), Identifier.class).stream(),
+                    extractExpressions(ImmutableList.of(node.getArguments().get(0)), DereferenceExpression.class).stream())
+                    .filter(expression -> columnReferences.containsKey(NodeRef.of(expression)))
+                    .collect(toImmutableList());
+            List<Expression> labeledInputColumns = extractExpressions(ImmutableList.of(node.getArguments().get(0)), DereferenceExpression.class).stream()
+                    .filter(expression -> labelDereferences.containsKey(NodeRef.of(expression)))
+                    .collect(toImmutableList());
+            List<FunctionCall> classifiers = extractExpressions(ImmutableList.of(node.getArguments().get(0)), FunctionCall.class).stream()
+                    .filter(this::isClassifierFunction)
+                    .collect(toImmutableList());
+            if (unlabeledInputColumns.isEmpty() && labeledInputColumns.isEmpty() && classifiers.isEmpty()) {
+                throw semanticException(INVALID_ARGUMENTS, node, "Pattern navigation function %s must contain at least one column reference or CLASSIFIER()", name);
+            }
+            // All column references inside pattern navigation function must be prefixed with the same label.
+            // Alternatively, all column references can have no label. In such case they are considered as prefixed with universal row pattern variable.
+            // CLASSIFIER() must have the same label or no label as its argument, respectively.
+            if (!unlabeledInputColumns.isEmpty() && !labeledInputColumns.isEmpty()) {
+                throw semanticException(
+                        INVALID_ARGUMENTS,
+                        labeledInputColumns.get(0),
+                        "Column references inside pattern navigation function %s must all either be prefixed with the same label or be not prefixed", name);
+            }
+            Set<Label> inputColumnLabels = labeledInputColumns.stream()
+                    .map(expression -> labelDereferences.get(NodeRef.of(expression)))
+                    .map(LabelPrefixedReference::getLabel)
+                    .collect(toImmutableSet());
+            if (inputColumnLabels.size() > 1) {
+                throw semanticException(
+                        INVALID_ARGUMENTS,
+                        labeledInputColumns.get(0),
+                        "Column references inside pattern navigation function %s must all either be prefixed with the same label or be not prefixed", name);
+            }
+            Set<Optional<Label>> classifierLabels = classifiers.stream()
+                    .map(functionCall -> {
+                        if (functionCall.getArguments().isEmpty()) {
+                            return Optional.<Label>empty();
+                        }
+                        return Optional.of(Label.from((Identifier) functionCall.getArguments().get(0)));
+                    })
+                    .collect(toImmutableSet());
+            if (classifierLabels.size() > 1) {
+                throw semanticException(
+                        INVALID_ARGUMENTS,
+                        node,
+                        "CLASSIFIER() calls inside pattern navigation function %s must all either have the same label as the argument or have no arguments", name);
+            }
+            if (!unlabeledInputColumns.isEmpty() && !classifiers.isEmpty()) {
+                if (!getOnlyElement(classifierLabels).equals(Optional.empty())) {
+                    throw semanticException(
+                            INVALID_ARGUMENTS,
+                            node,
+                            "Column references inside pattern navigation function %s must all be prefixed with the same label that all CLASSIFIER() calls have as the argument", name);
+                }
+            }
+            if (!labeledInputColumns.isEmpty() && !classifiers.isEmpty()) {
+                if (!getOnlyElement(classifierLabels).equals(Optional.of(getOnlyElement(inputColumnLabels)))) {
+                    throw semanticException(
+                            INVALID_ARGUMENTS,
+                            node,
+                            "Column references inside pattern navigation function %s must all be prefixed with the same label that all CLASSIFIER() calls have as the argument", name);
+                }
+            }
+        }
+
+        private boolean isPatternNavigationFunction(FunctionCall node)
+        {
+            QualifiedName qualifiedName = node.getName();
+            if (qualifiedName.getParts().size() > 1) {
+                return false;
+            }
+            String name = qualifiedName.getSuffix();
+            return name.equalsIgnoreCase("FIRST") ||
+                    name.equalsIgnoreCase("LAST") ||
+                    name.equalsIgnoreCase("PREV") ||
+                    name.equalsIgnoreCase("NEXT");
+        }
+
+        private boolean isClassifierFunction(FunctionCall node)
+        {
+            QualifiedName qualifiedName = node.getName();
+            if (qualifiedName.getParts().size() > 1) {
+                return false;
+            }
+            return qualifiedName.getSuffix().equalsIgnoreCase("CLASSIFIER");
         }
 
         @Override
