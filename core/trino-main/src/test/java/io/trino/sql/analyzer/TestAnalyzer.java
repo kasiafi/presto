@@ -89,9 +89,11 @@ import static io.trino.spi.StandardErrorCode.INVALID_COLUMN_REFERENCE;
 import static io.trino.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT;
 import static io.trino.spi.StandardErrorCode.INVALID_LIMIT_CLAUSE;
 import static io.trino.spi.StandardErrorCode.INVALID_LITERAL;
+import static io.trino.spi.StandardErrorCode.INVALID_NAVIGATION_NESTING;
 import static io.trino.spi.StandardErrorCode.INVALID_ORDER_BY;
 import static io.trino.spi.StandardErrorCode.INVALID_PARAMETER_USAGE;
 import static io.trino.spi.StandardErrorCode.INVALID_PARTITION_BY;
+import static io.trino.spi.StandardErrorCode.INVALID_PROCESSING_MODE;
 import static io.trino.spi.StandardErrorCode.INVALID_RECURSIVE_REFERENCE;
 import static io.trino.spi.StandardErrorCode.INVALID_VIEW;
 import static io.trino.spi.StandardErrorCode.INVALID_WINDOW_FRAME;
@@ -2949,6 +2951,255 @@ public class TestAnalyzer
                 .hasMessage("line 1:1: Values rows have mismatched types: row(integer, integer) vs row(varchar(1), varchar(1))");
 
         analyze("VALUES 'a', ('a'), ROW('a'), CAST(ROW('a') AS row(char(5)))");
+    }
+
+    @Test
+    public void testRowPatternRecognitionFunctions()
+    {
+        String query = "SELECT M.Measure " +
+                "          FROM (VALUES (1, 1, 9), (1, 2, 8)) Ticker(Symbol, Tradeday, Price) " +
+                "                 MATCH_RECOGNIZE ( " +
+                "                   ORDER BY Tradeday " +
+                "                   MEASURES %s AS Measure " +
+                "                   PATTERN (A B+) " +
+                "                   SUBSET U = (A, B) " +
+                "                   DEFINE B AS %s " +
+                "                 ) AS M";
+
+        // test illegal clauses in MEASURES
+        String define = "true";
+        assertFails(format(query, "LAST(Tradeday) OVER ()", define))
+                .hasErrorCode(NOT_SUPPORTED)
+                .hasMessage("line 1:195: Cannot use OVER with last pattern recognition function");
+
+        assertFails(format(query, "LAST(Tradeday) FILTER (WHERE true)", define))
+                .hasErrorCode(NOT_SUPPORTED)
+                .hasMessage("line 1:195: Cannot use FILTER with last pattern recognition function");
+
+        assertFails(format(query, "LAST(Tradeday ORDER BY Tradeday)", define))
+                .hasErrorCode(NOT_SUPPORTED)
+                .hasMessage("line 1:195: Cannot use ORDER BY with last pattern recognition function");
+
+        assertFails(format(query, "LAST(DISTINCT Tradeday)", define))
+                .hasErrorCode(NOT_SUPPORTED)
+                .hasMessage("line 1:195: Cannot use DISTINCT with last pattern recognition function");
+
+        // test illegal clauses in DEFINE
+        String measure = "true";
+        assertFails(format(query, measure, "CLASSIFIER(Tradeday) OVER () > 0"))
+                .hasErrorCode(NOT_SUPPORTED)
+                .hasMessage("line 1:313: Cannot use OVER with classifier pattern recognition function");
+
+        assertFails(format(query, measure, "CLASSIFIER(Tradeday) FILTER (WHERE true) > 0"))
+                .hasErrorCode(NOT_SUPPORTED)
+                .hasMessage("line 1:313: Cannot use FILTER with classifier pattern recognition function");
+
+        assertFails(format(query, measure, "CLASSIFIER(Tradeday ORDER BY Tradeday) > 0"))
+                .hasErrorCode(NOT_SUPPORTED)
+                .hasMessage("line 1:313: Cannot use ORDER BY with classifier pattern recognition function");
+
+        assertFails(format(query, measure, "CLASSIFIER(DISTINCT Tradeday) > 0"))
+                .hasErrorCode(NOT_SUPPORTED)
+                .hasMessage("line 1:313: Cannot use DISTINCT with classifier pattern recognition function");
+    }
+
+    @Test
+    public void testRunningAndFinalSemantics()
+    {
+        String query = "SELECT M.Measure " +
+                "          FROM (VALUES (1, 1, 9), (1, 2, 8)) Ticker(Symbol, Tradeday, Price) " +
+                "                 MATCH_RECOGNIZE ( " +
+                "                   ORDER BY Tradeday " +
+                "                   MEASURES %s AS Measure " +
+                "                   PATTERN (A B+) " +
+                "                   SUBSET U = (A, B) " +
+                "                   DEFINE B AS %s " +
+                "                ) AS M";
+
+        // pattern recognition functions in MEASURES
+        String define = "true";
+        analyze(format(query, "FINAL FIRST(Tradeday)", define));
+        analyze(format(query, "FINAL LAST(Tradeday)", define));
+
+        assertFails(format(query, "FINAL PREV(Tradeday)", define))
+                .hasErrorCode(NOT_SUPPORTED)
+                .hasMessage("line 1:195: FINAL semantics is not supported with prev pattern recognition function");
+
+        assertFails(format(query, "FINAL NEXT(Tradeday)", define))
+                .hasErrorCode(NOT_SUPPORTED)
+                .hasMessage("line 1:195: FINAL semantics is not supported with next pattern recognition function");
+
+        assertFails(format(query, "FINAL CLASSIFIER(Tradeday)", define))
+                .hasErrorCode(NOT_SUPPORTED)
+                .hasMessage("line 1:195: FINAL semantics is not supported with classifier pattern recognition function");
+
+        assertFails(format(query, "FINAL MATCH_NUMBER(Tradeday)", define))
+                .hasErrorCode(NOT_SUPPORTED)
+                .hasMessage("line 1:195: FINAL semantics is not supported with match_number pattern recognition function");
+
+        // aggregation function in pattern recognition context
+        assertFails(format(query, "FINAL avg(Tradeday)", define))
+                .hasErrorCode(NOT_SUPPORTED)
+                .hasMessage("line 1:195: Aggregations in pattern recognition context are not yet supported");
+
+        // scalar function in pattern recognition context
+        assertFails(format(query, "FINAL lower(Tradeday)", define))
+                .hasErrorCode(INVALID_PROCESSING_MODE)
+                .hasMessage("line 1:195: FINAL semantics is supported only for FIRST(), LAST() and aggregation functions. Actual: lower");
+
+        // out of pattern recognition context
+        assertFails("SELECT FINAL avg(x) FROM (VALUES 1) t(x)")
+                .hasErrorCode(INVALID_PROCESSING_MODE)
+                .hasMessage("line 1:8: FINAL semantics is not supported out of pattern recognition context");
+    }
+
+    @Test
+    public void testPatternNavigationFunctions()
+    {
+        String query = "SELECT M.Measure " +
+                "          FROM (VALUES (1, 1, 9), (1, 2, 8)) Ticker(Symbol, Tradeday, Price) " +
+                "                 MATCH_RECOGNIZE ( " +
+                "                   ORDER BY Tradeday " +
+                "                   MEASURES %s AS Measure " +
+                "                   PATTERN (A B+) " +
+                "                   SUBSET U = (A, B) " +
+                "                   DEFINE B AS true " +
+                "                ) AS M";
+
+        assertFails(format(query, "PREV()"))
+                .hasErrorCode(INVALID_FUNCTION_ARGUMENT)
+                .hasMessage("line 1:195: prev pattern recognition function requires 1 or 2 arguments");
+
+        assertFails(format(query, "PREV(Tradeday, 1, 'another')"))
+                .hasErrorCode(INVALID_FUNCTION_ARGUMENT)
+                .hasMessage("line 1:195: prev pattern recognition function requires 1 or 2 arguments");
+
+        assertFails(format(query, "PREV(Tradeday, 'text')"))
+                .hasErrorCode(INVALID_FUNCTION_ARGUMENT)
+                .hasMessage("line 1:195: prev pattern recognition navigation function requires number as the second argument");
+
+        assertFails(format(query, "PREV(Tradeday, -5)"))
+                .hasErrorCode(NUMERIC_VALUE_OUT_OF_RANGE)
+                .hasMessage("line 1:195: prev pattern recognition navigation function requires non-negative number as the second argument (actual: -5)");
+
+        assertFails(format(query, "PREV(Tradeday, 3000000000)"))
+                .hasErrorCode(NUMERIC_VALUE_OUT_OF_RANGE)
+                .hasMessage("line 1:195: The second argument of prev pattern recognition navigation function must not exceed 2147483647 (actual: 3000000000)");
+
+        // nested navigations
+        assertFails(format(query, "LAST(NEXT(Tradeday, 2))"))
+                .hasErrorCode(INVALID_NAVIGATION_NESTING)
+                .hasMessage("line 1:200: Cannot nest next pattern navigation function inside last pattern navigation function");
+
+        assertFails(format(query, "PREV(NEXT(Tradeday, 2))"))
+                .hasErrorCode(INVALID_NAVIGATION_NESTING)
+                .hasMessage("line 1:200: Cannot nest next pattern navigation function inside prev pattern navigation function");
+
+        analyze(format(query, "PREV(LAST(Tradeday, 2), 3)"));
+
+        assertFails(format(query, "PREV(LAST(Tradeday, 2) + LAST(Tradeday, 3))"))
+                .hasErrorCode(INVALID_NAVIGATION_NESTING)
+                .hasMessage("line 1:220: Cannot nest multiple pattern navigation functions inside prev pattern navigation function");
+
+        assertFails(format(query, "PREV(LAST(Tradeday, 2) + 5)"))
+                .hasErrorCode(INVALID_NAVIGATION_NESTING)
+                .hasMessage("line 1:200: Immediate nesting is required for pattern navigation functions");
+
+        // navigation function must column reference or CLASSIFIER()
+        assertFails(format(query, "PREV(LAST('no_column'))"))
+                .hasErrorCode(INVALID_ARGUMENTS)
+                .hasMessage("line 1:200: Pattern navigation function last must contain at least one column reference or CLASSIFIER()");
+
+        analyze(format(query, "PREV(LAST(Tradeday + 1))"));
+        analyze(format(query, "PREV(LAST(lower(CLASSIFIER())))"));
+
+        // labels inside pattern navigation function (as column prefixes and CLASSIFIER arguments) must be consistent
+        analyze(format(query, "PREV(LAST(length(CLASSIFIER(A)) + A.Tradeday + 1))"));
+        analyze(format(query, "PREV(LAST(length(CLASSIFIER()) + Tradeday + 1))"));
+        // mixed labels are allowed when not nested in navigation or aggregation
+        analyze(format(query, "PREV(LAST(A.Tradeday)) + length(CLASSIFIER(B)) + Price + U.Price"));
+
+        assertFails(format(query, "PREV(LAST(A.Tradeday + Price))"))
+                .hasErrorCode(INVALID_ARGUMENTS)
+                .hasMessage("line 1:205: Column references inside pattern navigation function last must all either be prefixed with the same label or be not prefixed");
+
+        assertFails(format(query, "PREV(LAST(A.Tradeday + B.Price))"))
+                .hasErrorCode(INVALID_ARGUMENTS)
+                .hasMessage("line 1:205: Column references inside pattern navigation function last must all either be prefixed with the same label or be not prefixed");
+
+        assertFails(format(query, "PREV(LAST(concat(CLASSIFIER(A), CLASSIFIER())))"))
+                .hasErrorCode(INVALID_ARGUMENTS)
+                .hasMessage("line 1:200: CLASSIFIER() calls inside pattern navigation function last must all either have the same label as the argument or have no arguments");
+
+        assertFails(format(query, "PREV(LAST(concat(CLASSIFIER(A), CLASSIFIER(B))))"))
+                .hasErrorCode(INVALID_ARGUMENTS)
+                .hasMessage("line 1:200: CLASSIFIER() calls inside pattern navigation function last must all either have the same label as the argument or have no arguments");
+
+        assertFails(format(query, "PREV(LAST(Tradeday + length(CLASSIFIER(B))))"))
+                .hasErrorCode(INVALID_ARGUMENTS)
+                .hasMessage("line 1:200: Column references inside pattern navigation function last must all be prefixed with the same label that all CLASSIFIER() calls have as the argument");
+
+        assertFails(format(query, "PREV(LAST(A.Tradeday + length(CLASSIFIER(B))))"))
+                .hasErrorCode(INVALID_ARGUMENTS)
+                .hasMessage("line 1:200: Column references inside pattern navigation function last must all be prefixed with the same label that all CLASSIFIER() calls have as the argument");
+
+        assertFails(format(query, "PREV(LAST(A.Tradeday + length(CLASSIFIER())))"))
+                .hasErrorCode(INVALID_ARGUMENTS)
+                .hasMessage("line 1:200: Column references inside pattern navigation function last must all be prefixed with the same label that all CLASSIFIER() calls have as the argument");
+    }
+
+    @Test
+    public void testClassifierFunction()
+    {
+        String query = "SELECT M.Measure " +
+                "          FROM (VALUES (1, 1, 9), (1, 2, 8)) Ticker(Symbol, Tradeday, Price) " +
+                "                 MATCH_RECOGNIZE ( " +
+                "                   ORDER BY Tradeday " +
+                "                   MEASURES %s AS Measure " +
+                "                   PATTERN (A B+) " +
+                "                   SUBSET U = (A, B) " +
+                "                   DEFINE B AS true " +
+                "                ) AS M";
+
+        analyze(format(query, "CLASSIFIER(A)"));
+        analyze(format(query, "CLASSIFIER(U)"));
+        analyze(format(query, "CLASSIFIER()"));
+
+        assertFails(format(query, "CLASSIFIER(A, B)"))
+                .hasErrorCode(INVALID_FUNCTION_ARGUMENT)
+                .hasMessage("line 1:195: CLASSIFIER pattern recognition function takes no arguments or 1 argument");
+
+        assertFails(format(query, "CLASSIFIER(A.x)"))
+                .hasErrorCode(TYPE_MISMATCH)
+                .hasMessage("line 1:206: CLASSIFIER function argument should be primary pattern variable or subset name. Actual: DereferenceExpression");
+
+        assertFails(format(query, "CLASSIFIER(\"$\")"))
+                .hasErrorCode(INVALID_FUNCTION_ARGUMENT)
+                .hasMessage("line 1:206: $ is not a valid primary pattern variable or subset name");
+
+        assertFails(format(query, "CLASSIFIER(C)"))
+                .hasErrorCode(INVALID_FUNCTION_ARGUMENT)
+                .hasMessage("line 1:206: C is not a primary pattern variable or subset name");
+    }
+
+    @Test
+    public void testMatchNumberFunction()
+    {
+        String query = "SELECT M.Measure " +
+                "          FROM (VALUES (1, 1, 9), (1, 2, 8)) Ticker(Symbol, Tradeday, Price) " +
+                "                 MATCH_RECOGNIZE ( " +
+                "                   ORDER BY Tradeday " +
+                "                   MEASURES %s AS Measure " +
+                "                   PATTERN (A B+) " +
+                "                   SUBSET U = (A, B) " +
+                "                   DEFINE B AS true " +
+                "                ) AS M";
+
+        analyze(format(query, "MATCH_NUMBER()"));
+
+        assertFails(format(query, "MATCH_NUMBER(A)"))
+                .hasErrorCode(INVALID_FUNCTION_ARGUMENT)
+                .hasMessage("line 1:195: MATCH_NUMBER pattern recognition function takes no arguments");
     }
 
     @BeforeClass
