@@ -121,6 +121,7 @@ import static io.trino.sql.tree.Join.Type.CROSS;
 import static io.trino.sql.tree.Join.Type.IMPLICIT;
 import static io.trino.sql.tree.Join.Type.INNER;
 import static io.trino.sql.tree.PatternRecognitionRelation.RowsPerMatch.ONE;
+import static io.trino.sql.tree.PatternSearchMode.Mode.INITIAL;
 import static io.trino.sql.tree.RowPatternTreeRewriter.rewriteWith;
 import static io.trino.sql.tree.SkipTo.Position.PAST_LAST;
 import static java.lang.Boolean.TRUE;
@@ -424,7 +425,7 @@ class RelationPlanner
                 node.getRowsPerMatch().orElse(ONE),
                 node.getRowPatternCommon().getAfterMatchSkipTo().flatMap(SkipTo::getIdentifier).map(Label::from),
                 node.getRowPatternCommon().getAfterMatchSkipTo().map(SkipTo::getPosition).orElse(PAST_LAST),
-                node.getRowPatternCommon().getInitial().orElse(TRUE),
+                node.getRowPatternCommon().getPatternSearchMode().map(mode -> mode.getMode() == INITIAL).orElse(TRUE),
                 pattern,
                 subsets.build(),
                 variableDefinitions.build());

@@ -141,6 +141,7 @@ import io.trino.sql.tree.PatternPermutation;
 import io.trino.sql.tree.PatternQuantifier;
 import io.trino.sql.tree.PatternRecognitionRelation;
 import io.trino.sql.tree.PatternRecognitionRelation.RowsPerMatch;
+import io.trino.sql.tree.PatternSearchMode;
 import io.trino.sql.tree.PatternVariable;
 import io.trino.sql.tree.Prepare;
 import io.trino.sql.tree.PrincipalSpecification;
@@ -246,6 +247,8 @@ import static io.trino.sql.tree.PatternRecognitionRelation.RowsPerMatch.ALL_OMIT
 import static io.trino.sql.tree.PatternRecognitionRelation.RowsPerMatch.ALL_SHOW_EMPTY;
 import static io.trino.sql.tree.PatternRecognitionRelation.RowsPerMatch.ALL_WITH_UNMATCHED;
 import static io.trino.sql.tree.PatternRecognitionRelation.RowsPerMatch.ONE;
+import static io.trino.sql.tree.PatternSearchMode.Mode.INITIAL;
+import static io.trino.sql.tree.PatternSearchMode.Mode.SEEK;
 import static io.trino.sql.tree.ProcessingMode.Mode.FINAL;
 import static io.trino.sql.tree.ProcessingMode.Mode.RUNNING;
 import static io.trino.sql.tree.SkipTo.skipPastLastRow;
@@ -1521,18 +1524,18 @@ class AstBuilder
     @Override
     public Node visitRowPatternCommon(SqlBaseParser.RowPatternCommonContext context)
     {
-        Optional<Boolean> initial = Optional.empty();
+        Optional<PatternSearchMode> searchMode = Optional.empty();
         if (context.INITIAL() != null) {
-            initial = Optional.of(true);
+            searchMode = Optional.of(new PatternSearchMode(getLocation(context.INITIAL()), INITIAL));
         }
-        if (context.SEEK() != null) {
-            initial = Optional.of(false);
+        else if (context.SEEK() != null) {
+            searchMode = Optional.of(new PatternSearchMode(getLocation(context.SEEK()), SEEK));
         }
 
         return new RowPatternCommon(
                 getLocation(context),
                 visitIfPresent(context.skipTo(), SkipTo.class),
-                initial,
+                searchMode,
                 (RowPattern) visit(context.patternAlternation()),
                 visit(context.subsetDefinition(), SubsetDefinition.class),
                 visit(context.variableDefinition(), VariableDefinition.class));

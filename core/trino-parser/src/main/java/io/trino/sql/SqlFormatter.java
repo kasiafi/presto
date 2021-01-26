@@ -607,8 +607,8 @@ public final class SqlFormatter
                 append(indent + 1, skipTo)
                         .append("\n");
             }
-            if (rowPatternCommon.getInitial().isPresent()) {
-                append(indent + 1, rowPatternCommon.getInitial().get() ? "INITIAL" : "SEEK")
+            if (rowPatternCommon.getPatternSearchMode().isPresent()) {
+                append(indent + 1, rowPatternCommon.getPatternSearchMode().get().getMode().name())
                         .append("\n");
             }
             append(indent + 1, "PATTERN (")

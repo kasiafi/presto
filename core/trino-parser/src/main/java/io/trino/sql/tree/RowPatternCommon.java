@@ -27,26 +27,26 @@ public class RowPatternCommon
         extends Node
 {
     private final Optional<SkipTo> afterMatchSkipTo;
-    private final Optional<Boolean> initial;
+    private final Optional<PatternSearchMode> patternSearchMode;
     private final RowPattern pattern;
     private final List<SubsetDefinition> subsets;
     private final List<VariableDefinition> variableDefinitions;
 
-    public RowPatternCommon(Optional<SkipTo> afterMatchSkipTo, Optional<Boolean> initial, RowPattern pattern, List<SubsetDefinition> subsets, List<VariableDefinition> variableDefinitions)
+    public RowPatternCommon(Optional<SkipTo> afterMatchSkipTo, Optional<PatternSearchMode> patternSearchMode, RowPattern pattern, List<SubsetDefinition> subsets, List<VariableDefinition> variableDefinitions)
     {
-        this(Optional.empty(), afterMatchSkipTo, initial, pattern, subsets, variableDefinitions);
+        this(Optional.empty(), afterMatchSkipTo, patternSearchMode, pattern, subsets, variableDefinitions);
     }
 
-    public RowPatternCommon(NodeLocation location, Optional<SkipTo> afterMatchSkipTo, Optional<Boolean> initial, RowPattern pattern, List<SubsetDefinition> subsets, List<VariableDefinition> variableDefinitions)
+    public RowPatternCommon(NodeLocation location, Optional<SkipTo> afterMatchSkipTo, Optional<PatternSearchMode> patternSearchMode, RowPattern pattern, List<SubsetDefinition> subsets, List<VariableDefinition> variableDefinitions)
     {
-        this(Optional.of(location), afterMatchSkipTo, initial, pattern, subsets, variableDefinitions);
+        this(Optional.of(location), afterMatchSkipTo, patternSearchMode, pattern, subsets, variableDefinitions);
     }
 
-    private RowPatternCommon(Optional<NodeLocation> location, Optional<SkipTo> afterMatchSkipTo, Optional<Boolean> initial, RowPattern pattern, List<SubsetDefinition> subsets, List<VariableDefinition> variableDefinitions)
+    private RowPatternCommon(Optional<NodeLocation> location, Optional<SkipTo> afterMatchSkipTo, Optional<PatternSearchMode> patternSearchMode, RowPattern pattern, List<SubsetDefinition> subsets, List<VariableDefinition> variableDefinitions)
     {
         super(location);
         this.afterMatchSkipTo = requireNonNull(afterMatchSkipTo, "afterMatchSkipTo is null");
-        this.initial = requireNonNull(initial, "initial is null");
+        this.patternSearchMode = requireNonNull(patternSearchMode, "patternSearchMode is null");
         this.pattern = requireNonNull(pattern, "pattern is null");
         this.subsets = requireNonNull(subsets, "subsets is null");
         requireNonNull(variableDefinitions, "variableDefinitions is null");
@@ -59,9 +59,9 @@ public class RowPatternCommon
         return afterMatchSkipTo;
     }
 
-    public Optional<Boolean> getInitial()
+    public Optional<PatternSearchMode> getPatternSearchMode()
     {
-        return initial;
+        return patternSearchMode;
     }
 
     public RowPattern getPattern()
@@ -93,6 +93,7 @@ public class RowPatternCommon
         builder.add(pattern)
                 .addAll(subsets)
                 .addAll(variableDefinitions);
+        patternSearchMode.ifPresent(builder::add);
 
         return builder.build();
     }
@@ -102,7 +103,7 @@ public class RowPatternCommon
     {
         return toStringHelper(this)
                 .add("afterMatchSkipTo", afterMatchSkipTo)
-                .add("initial", initial.orElse(null))
+                .add("patternSearchMode", patternSearchMode.orElse(null))
                 .add("pattern", pattern)
                 .add("subsets", subsets)
                 .add("variableDefinitions", variableDefinitions)
@@ -122,7 +123,7 @@ public class RowPatternCommon
 
         RowPatternCommon that = (RowPatternCommon) o;
         return Objects.equals(afterMatchSkipTo, that.afterMatchSkipTo) &&
-                Objects.equals(initial, that.initial) &&
+                Objects.equals(patternSearchMode, that.patternSearchMode) &&
                 Objects.equals(pattern, that.pattern) &&
                 Objects.equals(subsets, that.subsets) &&
                 Objects.equals(variableDefinitions, that.variableDefinitions);
@@ -131,16 +132,12 @@ public class RowPatternCommon
     @Override
     public int hashCode()
     {
-        return Objects.hash(afterMatchSkipTo, initial, pattern, subsets, variableDefinitions);
+        return Objects.hash(afterMatchSkipTo, patternSearchMode, pattern, subsets, variableDefinitions);
     }
 
     @Override
     public boolean shallowEquals(Node other)
     {
-        if (!sameClass(this, other)) {
-            return false;
-        }
-
-        return Objects.equals(initial, ((RowPatternCommon) other).initial);
+        return sameClass(this, other);
     }
 }
