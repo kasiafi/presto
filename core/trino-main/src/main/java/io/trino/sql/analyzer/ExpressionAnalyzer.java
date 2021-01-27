@@ -567,23 +567,29 @@ public class ExpressionAnalyzer
             if (qualifiedName != null) {
                 // In the context of row pattern matching, fields are optionally prefixed with labels. Labels are irrelevant during type analysis.
                 if (context.getContext().isPatternRecognition()) {
-                    if (qualifiedName.getParts().size() > 1) {
-                        Optional<Label> label = Label.tryCreateFrom(qualifiedName.getOriginalParts().get(0));
-                        if (label.isPresent() && context.getContext().getLabels().contains(label.get())) {
-                            QualifiedName unlabeledName = QualifiedName.of(qualifiedName.getOriginalParts().subList(1, qualifiedName.getOriginalParts().size()));
-                            Expression unlabeled = DereferenceExpression.from(unlabeledName);
-                            // If a dereference is prefixed with label, it must refer to input column (i.e. it must not be a row field reference)
-                            Optional<ResolvedField> resolvedField = context.getContext().getScope().tryResolveField(unlabeled, unlabeledName);
-                            if (resolvedField.isEmpty()) {
-                                throw semanticException(COLUMN_NOT_FOUND, node, "Column %s prefixed with label %s is not present in the input relation", unlabeledName, label.get().getName());
-                            }
-                            // Correlation is not allowed in pattern recognition context. CorrelationSupport.DISALLOWED was set when creating the ExpressionAnalyzer,
-                            // and so the following call should fail if the field is from outer scope.
-                            Type type = process(unlabeled, new StackableAstVisitorContext<>(context.getContext().notExpectingLabels()));
-                            labelDereferences.put(NodeRef.of(node), new LabelPrefixedReference(label.get(), unlabeled));
-                            return setExpressionType(node, type);
+                    Optional<Label> label = Label.tryCreateFrom(qualifiedName.getOriginalParts().get(0));
+                    if (label.isPresent() && context.getContext().getLabels().contains(label.get())) {
+                        // In the context of row pattern matching, the name of row pattern input table cannot be used to qualify column names.
+                        // (it can only be accessed in PARTITION BY and ORDER BY clauses of MATCH_RECOGNIZE). Consequentially, if a dereference
+                        // expression starts with a label, the next part must be a column.
+                        // Only strict column references can be prefixed by label. Labeled references to row fields are not supported.
+                        QualifiedName unlabeledName = QualifiedName.of(qualifiedName.getOriginalParts().subList(1, qualifiedName.getOriginalParts().size()));
+                        if (qualifiedName.getOriginalParts().size() > 2) {
+                            throw semanticException(COLUMN_NOT_FOUND, node, "Column %s prefixed with label %s cannot be resolved", unlabeledName, label.get().getName());
                         }
+                        Expression unlabeled = DereferenceExpression.from(unlabeledName);
+                        Optional<ResolvedField> resolvedField = context.getContext().getScope().tryResolveField(unlabeled, unlabeledName);
+                        if (resolvedField.isEmpty()) {
+                            throw semanticException(COLUMN_NOT_FOUND, node, "Column %s prefixed with label %s cannot be resolved", unlabeledName, label.get().getName());
+                        }
+                        // Correlation is not allowed in pattern recognition context. CorrelationSupport.DISALLOWED was set when creating the ExpressionAnalyzer,
+                        // and so the following call should fail if the field is from outer scope.
+                        Type type = process(unlabeled, new StackableAstVisitorContext<>(context.getContext().notExpectingLabels()));
+                        labelDereferences.put(NodeRef.of(node), new LabelPrefixedReference(label.get(), unlabeled));
+                        return setExpressionType(node, type);
                     }
+                    // In the context of row pattern matching, qualified column references are not allowed.
+                    throw missingAttributeException(node, qualifiedName);
                 }
 
                 Scope scope = context.getContext().getScope();

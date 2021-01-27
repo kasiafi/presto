@@ -76,9 +76,7 @@ public class TestRowPatternMatching
 
         assertThat(assertions.query("SELECT M.Symbol, /* ticker symbol */ " +
                 "                 M.Tradeday, /* ordering column */ " +
-                "                 M.Startp, /* starting price */ " +
-                "                 M.Bottomp, /* bottom price */ " +
-                "                 M.Endp /* ending price */ " +
+                "                 M.Startp /* starting price */ " +
                 "          FROM (VALUES " +
                 "                   (1, 1, 100), " +
                 "                   (1, 2, 8), " +
@@ -94,29 +92,23 @@ public class TestRowPatternMatching
                 "                 MATCH_RECOGNIZE ( " +
                 "                   PARTITION BY Symbol " +
                 "                   ORDER BY Tradeday " +
-                "                   MEASURES " +
-                "                            A.Price AS Startp, " +
-                "                            LAST (B.Price) AS Bottomp, " +
-                "                            LAST (C.Price) AS Endp " +
+                "                   MEASURES A.Price AS Startp " +
                 "                   ALL ROWS PER MATCH " +
                 "                   AFTER MATCH SKIP PAST LAST ROW " +
                 "                   PATTERN ( A ()* ) " +
-                "                   SUBSET U = (A, B, C) " +
-                "                   DEFINE /* A defaults to True, matches any row */ " +
-                "                          B AS B.Price < PREV (B.Price), " +
-                "                          C AS C.Price > PREV (C.Price) " +
+                "                   DEFINE A AS true " +
                 "                ) AS M"))
                 .matches("VALUES " +
-                        "     (1,  1, 100, CAST(NULL AS integer), CAST(NULL AS integer))," +
-                        "     (1,  2,   8, NULL, NULL)," +
-                        "     (1,  3,   6, NULL, NULL)," +
-                        "     (1,  4,   8, NULL, NULL)," +
-                        "     (1,  5,  10, NULL, NULL)," +
-                        "     (1,  6,  10, NULL, NULL)," +
-                        "     (1,  7,  11, NULL, NULL)," +
-                        "     (1,  8,   9, NULL, NULL)," +
-                        "     (1,  9,   8, NULL, NULL)," +
-                        "     (1, 10,  10, NULL, NULL)");
+                        "     (1,  1, 100)," +
+                        "     (1,  2,   8)," +
+                        "     (1,  3,   6)," +
+                        "     (1,  4,   8)," +
+                        "     (1,  5,  10)," +
+                        "     (1,  6,  10)," +
+                        "     (1,  7,  11)," +
+                        "     (1,  8,   9)," +
+                        "     (1,  9,   8)," +
+                        "     (1, 10,  10)");
 
         assertThat(assertions.query("SELECT M.Symbol, /* ticker symbol */ " +
                 "                 M.Tradeday, /* ordering column */ " +
@@ -314,9 +306,7 @@ public class TestRowPatternMatching
 
         assertThat(assertions.query("SELECT M.Symbol, /* ticker symbol */ " +
                 "                 M.Tradeday, /* ordering column */ " +
-                "                 M.Startp, /* starting price */ " +
-                "                 M.Bottomp, /* bottom price */ " +
-                "                 M.Endp /* ending price */ " +
+                "                 M.Startp /* starting price */ " +
                 "          FROM (VALUES " +
                 "                   (1, 1, 100), " +
                 "                   (1, 2, 8), " +
@@ -332,29 +322,23 @@ public class TestRowPatternMatching
                 "                 MATCH_RECOGNIZE ( " +
                 "                   PARTITION BY Symbol " +
                 "                   ORDER BY Tradeday " +
-                "                   MEASURES " +
-                "                            A.Price AS Startp, " +
-                "                            LAST (B.Price) AS Bottomp, " +
-                "                            LAST (C.Price) AS Endp " +
+                "                   MEASURES A.Price AS Startp " +
                 "                   ALL ROWS PER MATCH " +
                 "                   AFTER MATCH SKIP PAST LAST ROW " +
                 "                   PATTERN ( A {- () -} A) " +
-                "                   SUBSET U = (A, B, C) " +
-                "                   DEFINE /* A defaults to True, matches any row */ " +
-                "                          B AS B.Price < PREV (B.Price), " +
-                "                          C AS C.Price > PREV (C.Price) " +
+                "                   DEFINE A AS true " +
                 "                ) AS M"))
                 .matches("VALUES " +
-                        "     (1,  1, 100, CAST(NULL AS integer), CAST(NULL AS integer))," +
-                        "     (1,  2,   8, NULL, NULL)," +
-                        "     (1,  3,   6, NULL, NULL)," +
-                        "     (1,  4,   8, NULL, NULL)," +
-                        "     (1,  5,  10, NULL, NULL)," +
-                        "     (1,  6,  10, NULL, NULL)," +
-                        "     (1,  7,  11, NULL, NULL)," +
-                        "     (1,  8,   9, NULL, NULL)," +
-                        "     (1,  9,   8, NULL, NULL)," +
-                        "     (1, 10,  10, NULL, NULL)");
+                        "     (1,  1, 100)," +
+                        "     (1,  2,   8)," +
+                        "     (1,  3,   6)," +
+                        "     (1,  4,   8)," +
+                        "     (1,  5,  10)," +
+                        "     (1,  6,  10)," +
+                        "     (1,  7,  11)," +
+                        "     (1,  8,   9)," +
+                        "     (1,  9,   8)," +
+                        "     (1, 10,  10)");
 
         assertThat(assertions.query("SELECT M.Symbol, /* ticker symbol */ " +
                 "                 M.Tradeday, /* ordering column */ " +
@@ -538,15 +522,12 @@ public class TestRowPatternMatching
                 "                            match_number() AS Matchno, " +
                 "                            classifier() AS Classy, " +
                 "                            A.Price AS Startp, " +
-                "                            LAST (B.Price) AS Bottomp, " +
-                "                            LAST (C.Price) AS Endp " +
+                "                            LAST (A.Price) AS Bottomp, " +
+                "                            LAST (A.Price) AS Endp " +
                 "                   ALL ROWS PER MATCH " +
                 "                   AFTER MATCH SKIP PAST LAST ROW " +
                 "                   PATTERN (() | A) " +
-                "                   SUBSET U = (A, B, C) " +
-                "                   DEFINE /* A defaults to True, matches any row */ " +
-                "                          B AS B.Price < PREV (B.Price) AND PREV(classifier()) = 'A' AND match_number() < 3, " +
-                "                          C AS C.Price > PREV (C.Price) " +
+                "                   DEFINE A AS true " +
                 "                ) AS M"))
                 .matches("VALUES " +
                         "     (1,  CAST(1 AS bigint),  CAST(NULL AS varchar), CAST(NULL AS integer), CAST(NULL AS integer), CAST(NULL AS integer))," +
