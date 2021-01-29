@@ -123,7 +123,6 @@ import io.trino.sql.tree.Unnest;
 import io.trino.sql.tree.Update;
 import io.trino.sql.tree.UpdateAssignment;
 import io.trino.sql.tree.Values;
-import io.trino.sql.tree.WindowDefinition;
 import io.trino.sql.tree.With;
 import io.trino.sql.tree.WithQuery;
 
@@ -340,21 +339,9 @@ public final class SqlFormatter
 
             if (!node.getWindows().isEmpty()) {
                 append(indent, "WINDOW");
-                if (node.getWindows().size() == 1) {
-                    builder.append(" ")
-                            .append(formatWindowDefinition(node.getWindows().get(0)))
-                            .append("\n");
-                }
-                else {
-                    int size = node.getWindows().size();
-                    builder.append("\n");
-                    for (int i = 0; i < size - 1; i++) {
-                        append(indent + 1, formatWindowDefinition(node.getWindows().get(i)))
-                                .append(",\n");
-                    }
-                    append(indent + 1, formatWindowDefinition(node.getWindows().get(size - 1)))
-                            .append("\n");
-                }
+                formatDefinitionList(node.getWindows().stream()
+                        .map(definition -> formatExpression(definition.getName()) + " AS " + formatWindowSpecification(definition.getWindow()))
+                        .collect(toImmutableList()), indent + 1);
             }
 
             if (node.getOrderBy().isPresent()) {
@@ -369,11 +356,6 @@ public final class SqlFormatter
                 process(node.getLimit().get(), indent);
             }
             return null;
-        }
-
-        private String formatWindowDefinition(WindowDefinition definition)
-        {
-            return formatExpression(definition.getName()) + " AS " + formatWindowSpecification(definition.getWindow());
         }
 
         @Override
