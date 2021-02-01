@@ -95,6 +95,7 @@ import static io.trino.spi.StandardErrorCode.INVALID_ORDER_BY;
 import static io.trino.spi.StandardErrorCode.INVALID_PARAMETER_USAGE;
 import static io.trino.spi.StandardErrorCode.INVALID_PARTITION_BY;
 import static io.trino.spi.StandardErrorCode.INVALID_PROCESSING_MODE;
+import static io.trino.spi.StandardErrorCode.INVALID_RANGE;
 import static io.trino.spi.StandardErrorCode.INVALID_RECURSIVE_REFERENCE;
 import static io.trino.spi.StandardErrorCode.INVALID_ROW_PATTERN;
 import static io.trino.spi.StandardErrorCode.INVALID_VIEW;
@@ -3351,6 +3352,55 @@ public class TestAnalyzer
         assertFails(format(query, "ALL ROWS PER MATCH WITH UNMATCHED ROWS"))
                 .hasErrorCode(INVALID_ROW_PATTERN)
                 .hasMessage("line 1:201: Pattern exclusion syntax is not allowed when ALL ROWS PER MATCH WITH UNMATCHED ROWS is specified");
+    }
+
+    @Test
+    public void testPatternQuantifiers()
+    {
+        String query = "SELECT * " +
+                "          FROM (VALUES 1) Ticker(x) " +
+                "                 MATCH_RECOGNIZE ( " +
+                "                   PARTITION BY x " +
+                "                   PATTERN (A %s) " +
+                "                   DEFINE A AS true " +
+                "                 ) ";
+
+        analyze(format(query, "*"));
+        analyze(format(query, "*?"));
+        analyze(format(query, "+"));
+        analyze(format(query, "+?"));
+        analyze(format(query, "?"));
+        analyze(format(query, "??"));
+        analyze(format(query, "{,}"));
+        analyze(format(query, "{5}"));
+        assertFails(format(query, "{0}"))
+                .hasErrorCode(NUMERIC_VALUE_OUT_OF_RANGE)
+                .hasMessage("line 1:145: Pattern quantifier upper bound must be greater than or equal to 1");
+        assertFails(format(query, "{3000000000}"))
+                .hasErrorCode(NUMERIC_VALUE_OUT_OF_RANGE)
+                .hasMessage("line 1:145: Pattern quantifier lower bound must not exceed 2147483647");
+        analyze(format(query, "{5,}"));
+        analyze(format(query, "{0,}"));
+        assertFails(format(query, "{3000000000,}"))
+                .hasErrorCode(NUMERIC_VALUE_OUT_OF_RANGE)
+                .hasMessage("line 1:145: Pattern quantifier lower bound must not exceed 2147483647");
+        analyze(format(query, "{0,5}"));
+        assertFails(format(query, "{0,0}"))
+                .hasErrorCode(NUMERIC_VALUE_OUT_OF_RANGE)
+                .hasMessage("line 1:145: Pattern quantifier upper bound must be greater than or equal to 1");
+        assertFails(format(query, "{5, 3000000000}"))
+                .hasErrorCode(NUMERIC_VALUE_OUT_OF_RANGE)
+                .hasMessage("line 1:145: Pattern quantifier upper bound must not exceed 2147483647");
+        assertFails(format(query, "{5,1}"))
+                .hasErrorCode(INVALID_RANGE)
+                .hasMessage("line 1:145: Pattern quantifier lower bound must not exceed upper bound");
+        analyze(format(query, "{,5}"));
+        assertFails(format(query, "{,0}"))
+                .hasErrorCode(NUMERIC_VALUE_OUT_OF_RANGE)
+                .hasMessage("line 1:145: Pattern quantifier upper bound must be greater than or equal to 1");
+        assertFails(format(query, "{,3000000000}"))
+                .hasErrorCode(NUMERIC_VALUE_OUT_OF_RANGE)
+                .hasMessage("line 1:145: Pattern quantifier upper bound must not exceed 2147483647");
     }
 
     @Test

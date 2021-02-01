@@ -21,9 +21,12 @@ import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import io.trino.sql.RowPatternFormatter;
 import io.trino.sql.parser.SqlParser;
+import io.trino.sql.tree.BoundedQuantifier;
 import io.trino.sql.tree.Label;
 import io.trino.sql.tree.PatternLabel;
 import io.trino.sql.tree.PatternVariable;
+import io.trino.sql.tree.QuantifiedPattern;
+import io.trino.sql.tree.RangeQuantifier;
 import io.trino.sql.tree.RowPattern;
 import io.trino.sql.tree.RowPatternRewriter;
 import io.trino.sql.tree.RowPatternTreeRewriter;
@@ -31,8 +34,10 @@ import io.trino.sql.tree.RowPatternTreeRewriter;
 import javax.inject.Inject;
 
 import java.io.IOException;
+import java.util.Optional;
 
 import static io.trino.sql.tree.RowPatternTreeRewriter.rewriteWith;
+import static java.lang.Math.toIntExact;
 
 public final class RowPatternSerialization
 {
@@ -66,13 +71,26 @@ public final class RowPatternSerialization
         {
             RowPattern pattern = sqlParser.createRowPattern(jsonParser.readValueAs(String.class));
 
-            // rewrite identifiers to pattern labels
+            // rewrite identifiers to pattern labels and resolve quantifier ranges
             return rewriteWith(new RowPatternRewriter<>()
             {
                 @Override
                 public RowPattern rewritePatternVariable(PatternVariable node, Void context, RowPatternTreeRewriter<Void> treeRewriter)
                 {
                     return new PatternLabel(Label.from(node.getName()));
+                }
+
+                @Override
+                public RowPattern rewriteQuantifiedPattern(QuantifiedPattern node, Void context, RowPatternTreeRewriter<Void> treeRewriter)
+                {
+                    if (node.getPatternQuantifier() instanceof BoundedQuantifier) {
+                        BoundedQuantifier quantifier = (BoundedQuantifier) node.getPatternQuantifier();
+                        RowPattern pattern = treeRewriter.rewrite(node.getPattern(), context);
+                        Optional<Integer> atLeast = quantifier.getAtLeast().map(literal -> toIntExact(literal.getValue()));
+                        Optional<Integer> atMost = quantifier.getAtMost().map(literal -> toIntExact(literal.getValue()));
+                        return new QuantifiedPattern(pattern, new RangeQuantifier(quantifier.isGreedy(), atLeast, atMost));
+                    }
+                    return super.rewriteQuantifiedPattern(node, context, treeRewriter);
                 }
             }, pattern);
         }

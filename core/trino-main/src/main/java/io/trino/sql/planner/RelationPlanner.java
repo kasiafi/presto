@@ -27,6 +27,7 @@ import io.trino.spi.type.RowType;
 import io.trino.spi.type.Type;
 import io.trino.sql.ExpressionUtils;
 import io.trino.sql.analyzer.Analysis;
+import io.trino.sql.analyzer.Analysis.QuantifierRange;
 import io.trino.sql.analyzer.Analysis.UnnestAnalysis;
 import io.trino.sql.analyzer.Field;
 import io.trino.sql.analyzer.RelationType;
@@ -50,6 +51,7 @@ import io.trino.sql.planner.plan.ValuesNode;
 import io.trino.sql.planner.plan.WindowNode;
 import io.trino.sql.tree.AliasedRelation;
 import io.trino.sql.tree.AstVisitor;
+import io.trino.sql.tree.BoundedQuantifier;
 import io.trino.sql.tree.Cast;
 import io.trino.sql.tree.CoalesceExpression;
 import io.trino.sql.tree.ComparisonExpression;
@@ -71,8 +73,10 @@ import io.trino.sql.tree.PatternLabel;
 import io.trino.sql.tree.PatternRecognitionRelation;
 import io.trino.sql.tree.PatternVariable;
 import io.trino.sql.tree.QualifiedName;
+import io.trino.sql.tree.QuantifiedPattern;
 import io.trino.sql.tree.Query;
 import io.trino.sql.tree.QuerySpecification;
+import io.trino.sql.tree.RangeQuantifier;
 import io.trino.sql.tree.Relation;
 import io.trino.sql.tree.Row;
 import io.trino.sql.tree.RowPattern;
@@ -392,6 +396,18 @@ class RelationPlanner
             public RowPattern rewritePatternVariable(PatternVariable node, Void context, RowPatternTreeRewriter<Void> treeRewriter)
             {
                 return new PatternLabel(Label.from(node.getName()));
+            }
+
+            @Override
+            public RowPattern rewriteQuantifiedPattern(QuantifiedPattern node, Void context, RowPatternTreeRewriter<Void> treeRewriter)
+            {
+                if (node.getPatternQuantifier() instanceof BoundedQuantifier) {
+                    BoundedQuantifier quantifier = (BoundedQuantifier) node.getPatternQuantifier();
+                    QuantifierRange range = analysis.getQuantifierRange(quantifier);
+                    RowPattern pattern = treeRewriter.rewrite(node.getPattern(), context);
+                    return new QuantifiedPattern(pattern, new RangeQuantifier(quantifier.isGreedy(), range.getAtLeast(), range.getAtMost()));
+                }
+                return super.rewriteQuantifiedPattern(node, context, treeRewriter);
             }
         }, node.getRowPatternCommon().getPattern());
 

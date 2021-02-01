@@ -22,25 +22,35 @@ import java.util.Optional;
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static java.util.Objects.requireNonNull;
 
-public class RangeQuantifier
+public class BoundedQuantifier
         extends PatternQuantifier
 {
-    private final Optional<Integer> atLeast;
-    private final Optional<Integer> atMost;
+    private final Optional<LongLiteral> atLeast;
+    private final Optional<LongLiteral> atMost;
 
-    public RangeQuantifier(boolean greedy, Optional<Integer> atLeast, Optional<Integer> atMost)
+    public BoundedQuantifier(boolean greedy, Optional<LongLiteral> atLeast, Optional<LongLiteral> atMost)
     {
-        super(Optional.empty(), greedy);
+        this(Optional.empty(), greedy, atLeast, atMost);
+    }
+
+    public BoundedQuantifier(NodeLocation location, boolean greedy, Optional<LongLiteral> atLeast, Optional<LongLiteral> atMost)
+    {
+        this(Optional.of(location), greedy, atLeast, atMost);
+    }
+
+    private BoundedQuantifier(Optional<NodeLocation> location, boolean greedy, Optional<LongLiteral> atLeast, Optional<LongLiteral> atMost)
+    {
+        super(location, greedy);
         this.atLeast = requireNonNull(atLeast, "atLeast is null");
         this.atMost = requireNonNull(atMost, "atMost is null");
     }
 
-    public Optional<Integer> getAtLeast()
+    public Optional<LongLiteral> getAtLeast()
     {
         return atLeast;
     }
 
-    public Optional<Integer> getAtMost()
+    public Optional<LongLiteral> getAtMost()
     {
         return atMost;
     }
@@ -48,13 +58,16 @@ public class RangeQuantifier
     @Override
     public <R, C> R accept(AstVisitor<R, C> visitor, C context)
     {
-        return visitor.visitRangeQuantifier(this, context);
+        return visitor.visitBoundedQuantifier(this, context);
     }
 
     @Override
     public List<Node> getChildren()
     {
-        return ImmutableList.of();
+        ImmutableList.Builder<Node> children = ImmutableList.builder();
+        atLeast.ifPresent(children::add);
+        atMost.ifPresent(children::add);
+        return children.build();
     }
 
     @Override
@@ -66,7 +79,7 @@ public class RangeQuantifier
         if ((obj == null) || (getClass() != obj.getClass())) {
             return false;
         }
-        RangeQuantifier o = (RangeQuantifier) obj;
+        BoundedQuantifier o = (BoundedQuantifier) obj;
         return isGreedy() == o.isGreedy() &&
                 Objects.equals(atLeast, o.atLeast) &&
                 Objects.equals(atMost, o.atMost);

@@ -20,7 +20,6 @@ import io.trino.sql.tree.EmptyPattern;
 import io.trino.sql.tree.ExcludedPattern;
 import io.trino.sql.tree.GroupedPattern;
 import io.trino.sql.tree.Label;
-import io.trino.sql.tree.LongLiteral;
 import io.trino.sql.tree.Node;
 import io.trino.sql.tree.OneOrMoreQuantifier;
 import io.trino.sql.tree.PatternAlternation;
@@ -43,7 +42,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.collect.Collections2.orderedPermutations;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static io.trino.sql.tree.Label.EMPTY;
-import static java.lang.Math.toIntExact;
+import static java.lang.Math.max;
 
 final class RowPatternNFABuilder
         extends AstVisitor<RowPatternNFA, Boolean>
@@ -208,29 +207,44 @@ final class RowPatternNFABuilder
     @Override
     protected RowPatternNFA visitQuantifiedPattern(QuantifiedPattern node, Boolean inExclusion)
     {
-        if (node.getPatternQuantifier() instanceof OneOrMoreQuantifier || node.getPatternQuantifier() instanceof ZeroOrMoreQuantifier) {
-            return loopingQuantified(node, inExclusion);
+        if (node.getPatternQuantifier() instanceof ZeroOrMoreQuantifier) {
+            return loopingQuantified(node, 0, inExclusion);
         }
-
+        if (node.getPatternQuantifier() instanceof OneOrMoreQuantifier) {
+            return loopingQuantified(node, 1, inExclusion);
+        }
         if (node.getPatternQuantifier() instanceof ZeroOrOneQuantifier) {
             return rangeQuantified(node, 0, 1, inExclusion);
         }
         if (node.getPatternQuantifier() instanceof RangeQuantifier) {
             RangeQuantifier quantifier = (RangeQuantifier) node.getPatternQuantifier();
-            long min = quantifier.getAtLeast().map(value -> ((LongLiteral) value).getValue()).orElse(0L);
-            long max = quantifier.getAtMost().map(value -> ((LongLiteral) value).getValue()).orElse(0L);
-            return rangeQuantified(node, min, max, inExclusion);
+            int min = quantifier.getAtLeast().orElse(0);
+            if (quantifier.getAtMost().isPresent()) {
+                return rangeQuantified(node, min, quantifier.getAtMost().get(), inExclusion);
+            }
+            return loopingQuantified(node, min, inExclusion);
         }
         throw new IllegalStateException("unexpected PatternQuantifier type: " + node.getPatternQuantifier().getClass().getSimpleName());
     }
 
-    private RowPatternNFA loopingQuantified(QuantifiedPattern node, boolean inExclusion)
+    private RowPatternNFA loopingQuantified(QuantifiedPattern node, int min, boolean inExclusion)
     {
-        RowPatternNFA child = process(node.getPattern(), inExclusion);
-        State start = new State(singleEmptyTransition(child.getStartState()));
+        // chain min copies of the subpattern or 1 copy of the subpattern for quantifiers such as '*' or '{,}' which allow to skip subpattern
+        int copies = max(min, 1);
+        ImmutableList.Builder<RowPatternNFA> builder = ImmutableList.builder();
+        for (int i = 0; i < copies; i++) {
+            builder.add(process(node.getPattern(), inExclusion));
+        }
+        List<RowPatternNFA> parts = builder.build();
+        for (int i = 0; i < parts.size() - 1; i++) {
+            parts.get(i).getEndState().withTransitions(singleEmptyTransition(parts.get(i + 1).getStartState()));
+        }
+        State start = new State(singleEmptyTransition(parts.get(0).getStartState()));
         State end = new State();
+        RowPatternNFA last = parts.get(parts.size() - 1);
         Transition endingTransition = new Transition(EMPTY, end);
-        Transition loopingTransition = new Transition(EMPTY, child.getStartState());
+        Transition loopingTransition = new Transition(EMPTY, last.getStartState());
+
         // in order of preference
         LinkedList<Transition> orderedTransitions = new LinkedList<>();
         if (node.getPatternQuantifier().isGreedy()) {
@@ -241,10 +255,10 @@ final class RowPatternNFABuilder
             orderedTransitions.add(endingTransition);
             orderedTransitions.add(loopingTransition);
         }
-        child.getEndState().withTransitions(orderedTransitions);
+        last.getEndState().withTransitions(orderedTransitions);
 
-        // for '*' quantifier, add transition to skip the subpattern
-        if (node.getPatternQuantifier() instanceof ZeroOrMoreQuantifier) {
+        // for '*' or '{,}' quantifier, add transition to skip the subpattern
+        if (min == 0) {
             if (node.getPatternQuantifier().isGreedy()) {
                 start.addLeastPreferred(endingTransition);
             }
@@ -255,7 +269,7 @@ final class RowPatternNFABuilder
         return new RowPatternNFA(start, end);
     }
 
-    private RowPatternNFA rangeQuantified(QuantifiedPattern node, long min, long max, boolean inExclusion)
+    private RowPatternNFA rangeQuantified(QuantifiedPattern node, int min, int max, boolean inExclusion)
     {
         checkArgument(min <= max, "invalid range");
 
@@ -275,12 +289,12 @@ final class RowPatternNFABuilder
 
         // add transitions allowing to skip the remaining part after min iterations
         if (node.getPatternQuantifier().isGreedy()) {
-            for (int i = toIntExact(min); i < max; i++) {
+            for (int i = min; i < max; i++) {
                 parts.get(i).getStartState().addLeastPreferred(endingTransition);
             }
         }
         else {
-            for (int i = toIntExact(min); i < max; i++) {
+            for (int i = min; i < max; i++) {
                 parts.get(i).getStartState().addMostPreferred(endingTransition);
             }
         }

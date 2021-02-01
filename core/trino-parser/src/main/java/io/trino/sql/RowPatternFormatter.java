@@ -15,6 +15,7 @@ package io.trino.sql;
 
 import io.trino.sql.tree.AnchorPattern;
 import io.trino.sql.tree.AstVisitor;
+import io.trino.sql.tree.BoundedQuantifier;
 import io.trino.sql.tree.EmptyPattern;
 import io.trino.sql.tree.ExcludedPattern;
 import io.trino.sql.tree.GroupedPattern;
@@ -147,7 +148,7 @@ public final class RowPatternFormatter
         }
 
         @Override
-        protected String visitRangeQuantifier(RangeQuantifier node, Void context)
+        protected String visitBoundedQuantifier(BoundedQuantifier node, Void context)
         {
             String greedy = node.isGreedy() ? "" : "?";
             String atLeast = node.getAtLeast().map(ExpressionFormatter::formatExpression).orElse("");
@@ -159,6 +160,15 @@ public final class RowPatternFormatter
         protected String visitPatternLabel(PatternLabel node, Void context)
         {
             return node.getLabel().getName();
+        }
+
+        @Override
+        protected String visitRangeQuantifier(RangeQuantifier node, Void context)
+        {
+            String greedy = node.isGreedy() ? "" : "?";
+            String atLeast = node.getAtLeast().map(Object::toString).orElse("");
+            String atMost = node.getAtMost().map(Object::toString).orElse("");
+            return "{" + atLeast + "," + atMost + "}" + greedy;
         }
     }
 }

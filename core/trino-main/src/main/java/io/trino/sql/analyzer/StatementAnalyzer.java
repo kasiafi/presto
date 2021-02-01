@@ -60,6 +60,7 @@ import io.trino.spi.type.VarcharType;
 import io.trino.sql.InterpretedFunctionInvoker;
 import io.trino.sql.SqlPath;
 import io.trino.sql.analyzer.Analysis.GroupingSetAnalysis;
+import io.trino.sql.analyzer.Analysis.QuantifierRange;
 import io.trino.sql.analyzer.Analysis.ResolvedWindow;
 import io.trino.sql.analyzer.Analysis.SelectExpression;
 import io.trino.sql.analyzer.Analysis.UnnestAnalysis;
@@ -77,6 +78,7 @@ import io.trino.sql.tree.AllColumns;
 import io.trino.sql.tree.AllRows;
 import io.trino.sql.tree.Analyze;
 import io.trino.sql.tree.AstVisitor;
+import io.trino.sql.tree.BoundedQuantifier;
 import io.trino.sql.tree.Call;
 import io.trino.sql.tree.Comment;
 import io.trino.sql.tree.Commit;
@@ -226,6 +228,7 @@ import static io.trino.spi.StandardErrorCode.INVALID_LIMIT_CLAUSE;
 import static io.trino.spi.StandardErrorCode.INVALID_ORDER_BY;
 import static io.trino.spi.StandardErrorCode.INVALID_PARTITION_BY;
 import static io.trino.spi.StandardErrorCode.INVALID_PROCESSING_MODE;
+import static io.trino.spi.StandardErrorCode.INVALID_RANGE;
 import static io.trino.spi.StandardErrorCode.INVALID_RECURSIVE_REFERENCE;
 import static io.trino.spi.StandardErrorCode.INVALID_ROW_FILTER;
 import static io.trino.spi.StandardErrorCode.INVALID_ROW_PATTERN;
@@ -1644,6 +1647,37 @@ class StatementAnalyzer
             relation.getRowPatternCommon().getPatternSearchMode().ifPresent(mode -> {
                 throw semanticException(NOT_SUPPORTED, mode, "Pattern search modifier: %s is not allowed in MATCH_RECOGNIZE clause", mode.getMode());
             });
+
+            // validate pattern quantifiers
+            preOrder(relation.getRowPatternCommon().getPattern())
+                    .filter(BoundedQuantifier.class::isInstance)
+                    .map(BoundedQuantifier.class::cast)
+                    .forEach(quantifier -> {
+                        Optional<Long> atLeast = quantifier.getAtLeast().map(LongLiteral::getValue);
+                        atLeast.ifPresent(value -> {
+                            if (value < 0) {
+                                throw semanticException(NUMERIC_VALUE_OUT_OF_RANGE, quantifier, "Pattern quantifier lower bound must be greater than or equal to 0");
+                            }
+                            if (value > Integer.MAX_VALUE) {
+                                throw semanticException(NUMERIC_VALUE_OUT_OF_RANGE, quantifier, "Pattern quantifier lower bound must not exceed " + Integer.MAX_VALUE);
+                            }
+                        });
+                        Optional<Long> atMost = quantifier.getAtMost().map(LongLiteral::getValue);
+                        atMost.ifPresent(value -> {
+                            if (value < 1) {
+                                throw semanticException(NUMERIC_VALUE_OUT_OF_RANGE, quantifier, "Pattern quantifier upper bound must be greater than or equal to 1");
+                            }
+                            if (value > Integer.MAX_VALUE) {
+                                throw semanticException(NUMERIC_VALUE_OUT_OF_RANGE, quantifier, "Pattern quantifier upper bound must not exceed " + Integer.MAX_VALUE);
+                            }
+                        });
+                        if (atLeast.isPresent() && atMost.isPresent()) {
+                            if (atLeast.get() > atMost.get()) {
+                                throw semanticException(INVALID_RANGE, quantifier, "Pattern quantifier lower bound must not exceed upper bound");
+                            }
+                        }
+                        analysis.setQuantifierRange(quantifier, new QuantifierRange(atLeast.map(Math::toIntExact), atMost.map(Math::toIntExact)));
+                    });
 
             // validate pattern exclusions
             // exclusion syntax is not allowed in row pattern if ALL ROWS PER MATCH WITH UNMATCHED ROWS is specified

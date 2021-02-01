@@ -40,6 +40,7 @@ import io.trino.spi.security.ViewExpression;
 import io.trino.spi.type.Type;
 import io.trino.sql.analyzer.ExpressionAnalyzer.LabelPrefixedReference;
 import io.trino.sql.tree.AllColumns;
+import io.trino.sql.tree.BoundedQuantifier;
 import io.trino.sql.tree.DereferenceExpression;
 import io.trino.sql.tree.ExistsPredicate;
 import io.trino.sql.tree.Expression;
@@ -131,6 +132,8 @@ public class Analysis
 
     private final Set<NodeRef<FunctionCall>> patternRecognitionFunctions = new LinkedHashSet<>();
     private final Map<NodeRef<FunctionCall>, Long> navigationOffsets = new LinkedHashMap<>();
+
+    private final Map<NodeRef<BoundedQuantifier>, QuantifierRange> quantifierRanges = new LinkedHashMap<>();
 
     private final Map<NodeRef<QuerySpecification>, List<FunctionCall>> aggregates = new LinkedHashMap<>();
     private final Map<NodeRef<OrderBy>, List<Expression>> orderByAggregates = new LinkedHashMap<>();
@@ -882,6 +885,17 @@ public class Analysis
         return Optional.ofNullable(navigationOffsets.get(NodeRef.of(functionCall))).map(OptionalLong::of).orElse(OptionalLong.empty());
     }
 
+    public void setQuantifierRange(BoundedQuantifier quantifier, QuantifierRange range)
+    {
+        quantifierRanges.put(NodeRef.of(quantifier), range);
+    }
+
+    public QuantifierRange getQuantifierRange(BoundedQuantifier quantifier)
+    {
+        QuantifierRange range = quantifierRanges.get(NodeRef.of(quantifier));
+        return requireNonNull(range, "missing range for quantifier " + quantifier);
+    }
+
     public Map<AccessControlInfo, Map<QualifiedObjectName, Set<String>>> getTableColumnReferences()
     {
         return tableColumnReferences;
@@ -1546,6 +1560,28 @@ public class Analysis
         public Optional<Table> getTable()
         {
             return table;
+        }
+    }
+
+    public static class QuantifierRange
+    {
+        private final Optional<Integer> atLeast;
+        private final Optional<Integer> atMost;
+
+        public QuantifierRange(Optional<Integer> atLeast, Optional<Integer> atMost)
+        {
+            this.atLeast = requireNonNull(atLeast, "atLeast is null");
+            this.atMost = requireNonNull(atMost, "atMost is null");
+        }
+
+        public Optional<Integer> getAtLeast()
+        {
+            return atLeast;
+        }
+
+        public Optional<Integer> getAtMost()
+        {
+            return atMost;
         }
     }
 }

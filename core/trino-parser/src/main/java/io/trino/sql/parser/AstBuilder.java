@@ -31,6 +31,7 @@ import io.trino.sql.tree.BetweenPredicate;
 import io.trino.sql.tree.BinaryLiteral;
 import io.trino.sql.tree.BindExpression;
 import io.trino.sql.tree.BooleanLiteral;
+import io.trino.sql.tree.BoundedQuantifier;
 import io.trino.sql.tree.Call;
 import io.trino.sql.tree.CallArgument;
 import io.trino.sql.tree.Cast;
@@ -153,7 +154,6 @@ import io.trino.sql.tree.QuantifiedPattern;
 import io.trino.sql.tree.Query;
 import io.trino.sql.tree.QueryBody;
 import io.trino.sql.tree.QuerySpecification;
-import io.trino.sql.tree.RangeQuantifier;
 import io.trino.sql.tree.RefreshMaterializedView;
 import io.trino.sql.tree.Relation;
 import io.trino.sql.tree.RenameColumn;
@@ -2300,8 +2300,8 @@ class AstBuilder
             return new ZeroOrOneQuantifier(getLocation(context), greedy);
         }
 
-        Optional<Expression> atLeast = Optional.empty();
-        Optional<Expression> atMost = Optional.empty();
+        Optional<LongLiteral> atLeast = Optional.empty();
+        Optional<LongLiteral> atMost = Optional.empty();
         if (context.quantifier().exactly != null) {
             atLeast = Optional.of(new LongLiteral(getLocation(context.quantifier().exactly), context.quantifier().exactly.getText()));
             atMost = Optional.of(new LongLiteral(getLocation(context.quantifier().exactly), context.quantifier().exactly.getText()));
@@ -2312,7 +2312,7 @@ class AstBuilder
         if (context.quantifier().atMost != null) {
             atMost = Optional.of(new LongLiteral(getLocation(context.quantifier().atMost), context.quantifier().atMost.getText()));
         }
-        return new RangeQuantifier(getLocation(context), greedy, atLeast, atMost);
+        return new BoundedQuantifier(getLocation(context), greedy, atLeast, atMost);
     }
 
     // ************** literals **************

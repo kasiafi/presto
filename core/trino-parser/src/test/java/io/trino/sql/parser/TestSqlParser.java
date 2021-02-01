@@ -29,6 +29,7 @@ import io.trino.sql.tree.AtTimeZone;
 import io.trino.sql.tree.BetweenPredicate;
 import io.trino.sql.tree.BinaryLiteral;
 import io.trino.sql.tree.BooleanLiteral;
+import io.trino.sql.tree.BoundedQuantifier;
 import io.trino.sql.tree.Call;
 import io.trino.sql.tree.CallArgument;
 import io.trino.sql.tree.Cast;
@@ -126,7 +127,6 @@ import io.trino.sql.tree.QuantifiedComparisonExpression;
 import io.trino.sql.tree.QuantifiedPattern;
 import io.trino.sql.tree.Query;
 import io.trino.sql.tree.QuerySpecification;
-import io.trino.sql.tree.RangeQuantifier;
 import io.trino.sql.tree.RefreshMaterializedView;
 import io.trino.sql.tree.RenameColumn;
 import io.trino.sql.tree.RenameSchema;
@@ -685,10 +685,10 @@ public class TestSqlParser
         assertRowPattern("A??", new QuantifiedPattern(new PatternVariable(identifier("A")), new ZeroOrOneQuantifier(false)));
         assertRowPattern("^$", new PatternConcatenation(ImmutableList.of(new AnchorPattern(AnchorPattern.Type.PARTITION_START), new AnchorPattern(AnchorPattern.Type.PARTITION_END))));
         assertRowPattern("()", new EmptyPattern());
-        assertRowPattern("A{3}", new QuantifiedPattern(new PatternVariable(identifier("A")), new RangeQuantifier(true, Optional.of(new LongLiteral("3")), Optional.of(new LongLiteral("3")))));
-        assertRowPattern("A{3,}", new QuantifiedPattern(new PatternVariable(identifier("A")), new RangeQuantifier(true, Optional.of(new LongLiteral("3")), Optional.empty())));
-        assertRowPattern("A{,3}", new QuantifiedPattern(new PatternVariable(identifier("A")), new RangeQuantifier(true, Optional.empty(), Optional.of(new LongLiteral("3")))));
-        assertRowPattern("A{3,4}", new QuantifiedPattern(new PatternVariable(identifier("A")), new RangeQuantifier(true, Optional.of(new LongLiteral("3")), Optional.of(new LongLiteral("4")))));
+        assertRowPattern("A{3}", new QuantifiedPattern(new PatternVariable(identifier("A")), new BoundedQuantifier(true, Optional.of(new LongLiteral("3")), Optional.of(new LongLiteral("3")))));
+        assertRowPattern("A{3,}", new QuantifiedPattern(new PatternVariable(identifier("A")), new BoundedQuantifier(true, Optional.of(new LongLiteral("3")), Optional.empty())));
+        assertRowPattern("A{,3}", new QuantifiedPattern(new PatternVariable(identifier("A")), new BoundedQuantifier(true, Optional.empty(), Optional.of(new LongLiteral("3")))));
+        assertRowPattern("A{3,4}", new QuantifiedPattern(new PatternVariable(identifier("A")), new BoundedQuantifier(true, Optional.of(new LongLiteral("3")), Optional.of(new LongLiteral("4")))));
     }
 
     @Test

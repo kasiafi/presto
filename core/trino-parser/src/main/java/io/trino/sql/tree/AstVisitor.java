@@ -1052,6 +1052,11 @@ public abstract class AstVisitor<R, C>
         return visitPatternQuantifier(node, context);
     }
 
+    protected R visitBoundedQuantifier(BoundedQuantifier node, C context)
+    {
+        return visitPatternQuantifier(node, context);
+    }
+
     protected R visitRangeQuantifier(RangeQuantifier node, C context)
     {
         return visitPatternQuantifier(node, context);

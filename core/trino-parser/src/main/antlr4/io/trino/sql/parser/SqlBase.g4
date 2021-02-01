@@ -576,6 +576,7 @@ quantifier
     : ASTERISK
     | PLUS
     | QUESTION_MARK
+    | '{' ',' '}'
     | '{' exactly=INTEGER_VALUE '}'
     | '{' atLeast=INTEGER_VALUE ',' '}'
     | '{' atLeast=INTEGER_VALUE ',' atMost=INTEGER_VALUE '}'
