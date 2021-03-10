@@ -60,6 +60,8 @@ import static io.airlift.slice.Slices.utf8Slice;
 import static io.trino.SessionTestUtils.TEST_SESSION;
 import static io.trino.metadata.MetadataManager.createTestMetadataManager;
 import static io.trino.metadata.ResolvedFunction.extractFunctionName;
+import static io.trino.spi.StandardErrorCode.DIVISION_BY_ZERO;
+import static io.trino.spi.StandardErrorCode.GENERIC_USER_ERROR;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.BooleanType.BOOLEAN;
 import static io.trino.spi.type.DateType.DATE;
@@ -79,6 +81,7 @@ import static io.trino.sql.ExpressionUtils.rewriteIdentifiersToSymbolReferences;
 import static io.trino.sql.ParsingUtil.createParsingOptions;
 import static io.trino.sql.planner.ExpressionInterpreter.expressionInterpreter;
 import static io.trino.sql.planner.ExpressionInterpreter.expressionOptimizer;
+import static io.trino.testing.assertions.TrinoExceptionAssert.assertTrinoExceptionThrownBy;
 import static io.trino.type.DateTimes.scaleEpochMillisToMicros;
 import static io.trino.type.IntervalDayTimeType.INTERVAL_DAY_TIME;
 import static java.lang.String.format;
@@ -1428,6 +1431,38 @@ public class TestExpressionInterpreter
         optimize("INTERVAL '3' YEAR * unbound_long");
 
         assertEquals(optimize("X'1234'"), Slices.wrappedBuffer((byte) 0x12, (byte) 0x34));
+    }
+
+    @Test
+    public void testEvaluateFailingExpression()
+    {
+        assertTrinoExceptionThrownBy(() -> evaluate("0/0"))
+                .hasErrorCode(DIVISION_BY_ZERO);
+
+        assertTrinoExceptionThrownBy(() -> evaluate("fail('Some message')"))
+                .hasErrorCode(GENERIC_USER_ERROR)
+                .hasMessage("Some message");
+
+        assertTrinoExceptionThrownBy(() -> evaluate("IF(0 > 1, 0/1, 0/0)"))
+                .hasErrorCode(DIVISION_BY_ZERO);
+
+        assertTrinoExceptionThrownBy(() -> evaluate("IF(0/0 > 0, true, false)"))
+                .hasErrorCode(DIVISION_BY_ZERO);
+
+        assertTrinoExceptionThrownBy(() -> evaluate("coalesce(2/2, 1/1, 0/0)"))
+                .hasErrorCode(DIVISION_BY_ZERO);
+
+        assertTrinoExceptionThrownBy(() -> evaluate("CASE 0/0 WHEN 1 THEN 'x' END"))
+                .hasErrorCode(DIVISION_BY_ZERO);
+
+        assertTrinoExceptionThrownBy(() -> evaluate("CASE 1 WHEN 0/0 THEN 'x' END"))
+                .hasErrorCode(DIVISION_BY_ZERO);
+
+        assertTrinoExceptionThrownBy(() -> evaluate("CASE 1 WHEN 0 THEN 0/0 END"))
+                .hasErrorCode(DIVISION_BY_ZERO);
+
+        assertTrinoExceptionThrownBy(() -> evaluate("CASE 1 WHEN 1 THEN 1/1 ELSE 0/0 END"))
+                .hasErrorCode(DIVISION_BY_ZERO);
     }
 
     private static void assertLike(byte[] value, String pattern, boolean expected)

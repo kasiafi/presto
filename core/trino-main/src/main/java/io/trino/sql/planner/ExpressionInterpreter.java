@@ -455,10 +455,14 @@ public class ExpressionInterpreter
                 return process(expression, context);
             }
             catch (RuntimeException e) {
-                // HACK
-                // Certain operations like 0 / 0 or likeExpression may throw exceptions.
-                // Wrap them a FunctionCall that will throw the exception if the expression is actually executed
-                return createFailureFunction(e, type(expression), ExpressionInterpreter.this.metadata);
+                if (optimize) {
+                    // HACK
+                    // Certain operations like 0 / 0 or likeExpression may throw exceptions.
+                    // Wrap them a FunctionCall that will throw the exception if the expression is actually executed
+                    return createFailureFunction(e, type(expression), ExpressionInterpreter.this.metadata);
+                }
+                // Do not suppress exceptions during expression evaluation.
+                throw e;
             }
         }
 
