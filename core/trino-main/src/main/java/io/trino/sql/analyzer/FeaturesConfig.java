@@ -131,6 +131,7 @@ public class FeaturesConfig
     private boolean optimizeDuplicateInsensitiveJoins = true;
     private boolean useLegacyWindowFilterPushdown;
     private boolean planWithTableNodePartitioning = true;
+    private boolean mergeProjectWithValues = true;
 
     private Duration iterativeOptimizerTimeout = new Duration(3, MINUTES); // by default let optimizer wait a long time in case it retrieves some data from ConnectorMetadata
     private DataSize filterAndProjectMinOutputPageSize = DataSize.of(500, KILOBYTE);
@@ -1030,6 +1031,18 @@ public class FeaturesConfig
     public FeaturesConfig setPlanWithTableNodePartitioning(boolean planWithTableNodePartitioning)
     {
         this.planWithTableNodePartitioning = planWithTableNodePartitioning;
+        return this;
+    }
+
+    public boolean isMergeProjectWithValues()
+    {
+        return mergeProjectWithValues;
+    }
+
+    @Config("optimizer.merge-project-with-values")
+    public FeaturesConfig setMergeProjectWithValues(boolean mergeProjectWithValues)
+    {
+        this.mergeProjectWithValues = mergeProjectWithValues;
         return this;
     }
 }

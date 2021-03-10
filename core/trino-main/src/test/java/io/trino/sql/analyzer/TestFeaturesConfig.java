@@ -109,7 +109,8 @@ public class TestFeaturesConfig
                 .setRewriteFilteringSemiJoinToInnerJoin(true)
                 .setOptimizeDuplicateInsensitiveJoins(true)
                 .setUseLegacyWindowFilterPushdown(false)
-                .setPlanWithTableNodePartitioning(true));
+                .setPlanWithTableNodePartitioning(true)
+                .setMergeProjectWithValues(true));
     }
 
     @Test
@@ -184,6 +185,7 @@ public class TestFeaturesConfig
                 .put("optimizer.optimize-duplicate-insensitive-joins", "false")
                 .put("optimizer.use-legacy-window-filter-pushdown", "true")
                 .put("optimizer.plan-with-table-node-partitioning", "false")
+                .put("optimizer.merge-project-with-values", "false")
                 .build();
 
         FeaturesConfig expected = new FeaturesConfig()
@@ -254,7 +256,8 @@ public class TestFeaturesConfig
                 .setRewriteFilteringSemiJoinToInnerJoin(false)
                 .setOptimizeDuplicateInsensitiveJoins(false)
                 .setUseLegacyWindowFilterPushdown(true)
-                .setPlanWithTableNodePartitioning(false);
+                .setPlanWithTableNodePartitioning(false)
+                .setMergeProjectWithValues(false);
         assertFullMapping(properties, expected);
     }
 }
