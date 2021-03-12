@@ -5796,7 +5796,7 @@ public abstract class AbstractTestEngineOnlyQueries
     {
         int columns = 254;
 
-        MaterializedResult result = computeActual(pivotQuery(columns));
+        MaterializedResult result = computeActual(pivotQuery(columns, true));
         assertThat(result.getRowCount())
                 .as("row count")
                 .isEqualTo(columns);
@@ -5810,10 +5810,10 @@ public abstract class AbstractTestEngineOnlyQueries
     @Test
     public void testPivotExceedingMaximumArraySize()
     {
-        assertQueryFails(pivotQuery(255), "Too many arguments for array constructor");
+        assertQueryFails(pivotQuery(255, false), "Too many arguments for array constructor");
     }
 
-    private static String pivotQuery(int columnsCount)
+    private static String pivotQuery(int columnsCount, boolean interpretable)
     {
         String values = IntStream.range(0, columnsCount)
                 .mapToObj(columnNumber -> format("%d", columnNumber))
@@ -5823,7 +5823,16 @@ public abstract class AbstractTestEngineOnlyQueries
                 .mapToObj(columnNumber -> format("a%d", columnNumber))
                 .collect(joining(", "));
 
-        return format("SELECT * FROM (SELECT %s) a(%s) INNER JOIN unnest(ARRAY[%1$s], ARRAY[%2$s]) b(b1, b2) ON true", values, columns);
+        if (interpretable) {
+            return format("SELECT * FROM (SELECT %s) a(%s) INNER JOIN unnest(ARRAY[%1$s], ARRAY[%2$s]) b(b1, b2) ON true", values, columns);
+        }
+
+        String interpretableElements = IntStream.range(1, columnsCount)
+                .mapToObj(columnNumber -> format("%d", columnNumber))
+                .collect(joining(", "));
+
+        // add non-interpretable elements to arrays (0 / 0) to prevent optimization by ExpressionInterpreter so that the ArrayConstructor function is called
+        return format("SELECT * FROM (SELECT %s) a(%s) INNER JOIN unnest(ARRAY[0 / 0, %s], ARRAY[0 / 0, %3$s]) b(b1, b2) ON true", values, columns, interpretableElements);
     }
 
     private static ZonedDateTime zonedDateTime(String value)

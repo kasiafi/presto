@@ -52,6 +52,12 @@ public class TestExpressions
     }
 
     @Test
+    public void testInShortCircuit()
+    {
+        assertThat(assertions.query("SELECT 3 IN (2, 4, 3, 5 / 0)")).matches("VALUES true");
+    }
+
+    @Test
     public void testInlineNullBind()
     {
         // https://github.com/trinodb/trino/issues/3411
