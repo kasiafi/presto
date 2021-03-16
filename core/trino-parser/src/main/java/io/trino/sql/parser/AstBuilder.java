@@ -1440,7 +1440,13 @@ class AstBuilder
     @Override
     public Node visitSampledRelation(SqlBaseParser.SampledRelationContext context)
     {
-        Relation child = (Relation) visit(context.patternRecognitionRelation());
+        Relation child;
+        if (context.aliasedRelation() != null) {
+            child = (Relation) visit(context.aliasedRelation());
+        }
+        else {
+            child = (Relation) visit(context.patternRecognitionRelation());
+        }
 
         if (context.TABLESAMPLE() == null) {
             return child;
@@ -1458,25 +1464,19 @@ class AstBuilder
     {
         Relation child = (Relation) visit(context.aliasedRelation());
 
-        if (context.patternRecognition() == null) {
-            return child;
-        }
-
-        SqlBaseParser.PatternRecognitionContext patternRecognitionContext = context.patternRecognition();
-
         Optional<OrderBy> orderBy = Optional.empty();
-        if (patternRecognitionContext.ORDER() != null) {
-            orderBy = Optional.of(new OrderBy(getLocation(patternRecognitionContext.ORDER()), visit(patternRecognitionContext.sortItem(), SortItem.class)));
+        if (context.ORDER() != null) {
+            orderBy = Optional.of(new OrderBy(getLocation(context.ORDER()), visit(context.sortItem(), SortItem.class)));
         }
 
         PatternRecognitionRelation patternRecognitionRelation = new PatternRecognitionRelation(
                 getLocation(context),
                 child,
-                visit(patternRecognitionContext.partition, Expression.class),
+                visit(context.partition, Expression.class),
                 orderBy,
-                visit(patternRecognitionContext.measureDefinition(), MeasureDefinition.class),
-                getRowsPerMatch(patternRecognitionContext.rowsPerMatch()),
-                (RowPatternCommon) visit(patternRecognitionContext.rowPatternCommon()));
+                visit(context.measureDefinition(), MeasureDefinition.class),
+                getRowsPerMatch(context.rowsPerMatch()),
+                (RowPatternCommon) visit(context.rowPatternCommon()));
 
         if (context.identifier() == null) {
             return patternRecognitionRelation;

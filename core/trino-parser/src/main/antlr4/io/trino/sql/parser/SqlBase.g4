@@ -288,7 +288,7 @@ joinCriteria
     ;
 
 sampledRelation
-    : patternRecognitionRelation (
+    : (aliasedRelation | patternRecognitionRelation) (
         TABLESAMPLE sampleType '(' percentage=expression ')'
       )?
     ;
@@ -299,17 +299,13 @@ sampleType
     ;
 
 patternRecognitionRelation
-    : aliasedRelation (patternRecognition (AS? identifier columnAliases?)?)?
-    ;
-
-patternRecognition
-    : MATCH_RECOGNIZE '('
+    : aliasedRelation MATCH_RECOGNIZE '('
         (PARTITION BY partition+=expression (',' partition+=expression)*)?
         (ORDER BY sortItem (',' sortItem)*)?
         (MEASURES measureDefinition (',' measureDefinition)*)?
         rowsPerMatch?
         rowPatternCommon
-      ')'
+      ')' (AS? identifier columnAliases?)?
     ;
 
 measureDefinition
