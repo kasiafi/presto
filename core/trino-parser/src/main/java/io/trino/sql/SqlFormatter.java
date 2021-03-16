@@ -91,7 +91,6 @@ import io.trino.sql.tree.RevokeRoles;
 import io.trino.sql.tree.Rollback;
 import io.trino.sql.tree.Row;
 import io.trino.sql.tree.RowPattern;
-import io.trino.sql.tree.RowPatternCommon;
 import io.trino.sql.tree.SampledRelation;
 import io.trino.sql.tree.Select;
 import io.trino.sql.tree.SelectItem;
@@ -565,10 +564,9 @@ public final class SqlFormatter
                 append(indent + 1, rowsPerMatch)
                         .append("\n");
             }
-            RowPatternCommon rowPatternCommon = node.getRowPatternCommon();
-            if (rowPatternCommon.getAfterMatchSkipTo().isPresent()) {
+            if (node.getAfterMatchSkipTo().isPresent()) {
                 String skipTo;
-                switch (rowPatternCommon.getAfterMatchSkipTo().get().getPosition()) {
+                switch (node.getAfterMatchSkipTo().get().getPosition()) {
                     case PAST_LAST:
                         skipTo = "AFTER MATCH SKIP PAST LAST ROW";
                         break;
@@ -576,35 +574,35 @@ public final class SqlFormatter
                         skipTo = "AFTER MATCH SKIP TO NEXT ROW";
                         break;
                     case LAST:
-                        checkState(rowPatternCommon.getAfterMatchSkipTo().get().getIdentifier().isPresent(), "missing identifier in AFTER MATCH SKIP TO LAST");
-                        skipTo = "AFTER MATCH SKIP TO LAST " + formatExpression(rowPatternCommon.getAfterMatchSkipTo().get().getIdentifier().get());
+                        checkState(node.getAfterMatchSkipTo().get().getIdentifier().isPresent(), "missing identifier in AFTER MATCH SKIP TO LAST");
+                        skipTo = "AFTER MATCH SKIP TO LAST " + formatExpression(node.getAfterMatchSkipTo().get().getIdentifier().get());
                         break;
                     case FIRST:
-                        checkState(rowPatternCommon.getAfterMatchSkipTo().get().getIdentifier().isPresent(), "missing identifier in AFTER MATCH SKIP TO FIRST");
-                        skipTo = "AFTER MATCH SKIP TO FIRST " + formatExpression(rowPatternCommon.getAfterMatchSkipTo().get().getIdentifier().get());
+                        checkState(node.getAfterMatchSkipTo().get().getIdentifier().isPresent(), "missing identifier in AFTER MATCH SKIP TO FIRST");
+                        skipTo = "AFTER MATCH SKIP TO FIRST " + formatExpression(node.getAfterMatchSkipTo().get().getIdentifier().get());
                         break;
                     default:
-                        throw new IllegalStateException("unexpected skipTo: " + rowPatternCommon.getAfterMatchSkipTo().get());
+                        throw new IllegalStateException("unexpected skipTo: " + node.getAfterMatchSkipTo().get());
                 }
                 append(indent + 1, skipTo)
                         .append("\n");
             }
-            if (rowPatternCommon.getPatternSearchMode().isPresent()) {
-                append(indent + 1, rowPatternCommon.getPatternSearchMode().get().getMode().name())
+            if (node.getPatternSearchMode().isPresent()) {
+                append(indent + 1, node.getPatternSearchMode().get().getMode().name())
                         .append("\n");
             }
             append(indent + 1, "PATTERN (")
-                    .append(formatPattern(rowPatternCommon.getPattern()))
+                    .append(formatPattern(node.getPattern()))
                     .append(")\n");
-            if (!rowPatternCommon.getSubsets().isEmpty()) {
+            if (!node.getSubsets().isEmpty()) {
                 append(indent + 1, "SUBSET");
-                formatDefinitionList(rowPatternCommon.getSubsets().stream()
+                formatDefinitionList(node.getSubsets().stream()
                         .map(subset -> formatExpression(subset.getName()) + " = " + subset.getIdentifiers().stream()
                                 .map(ExpressionFormatter::formatExpression).collect(joining(", ", "(", ")")))
                         .collect(toImmutableList()), indent + 2);
             }
             append(indent + 1, "DEFINE");
-            formatDefinitionList(rowPatternCommon.getVariableDefinitions().stream()
+            formatDefinitionList(node.getVariableDefinitions().stream()
                     .map(variable -> formatExpression(variable.getName()) + " AS " + formatExpression(variable.getExpression()))
                     .collect(toImmutableList()), indent + 2);
 

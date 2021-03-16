@@ -20,6 +20,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 import static com.google.common.base.MoreObjects.toStringHelper;
+import static com.google.common.base.Preconditions.checkArgument;
 import static java.util.Objects.requireNonNull;
 
 public class PatternRecognitionRelation
@@ -30,19 +31,55 @@ public class PatternRecognitionRelation
     private final Optional<OrderBy> orderBy;
     private final List<MeasureDefinition> measures;
     private final Optional<RowsPerMatch> rowsPerMatch;
-    private final RowPatternCommon rowPatternCommon;
+    private final Optional<SkipTo> afterMatchSkipTo;
+    private final Optional<PatternSearchMode> patternSearchMode;
+    private final RowPattern pattern;
+    private final List<SubsetDefinition> subsets;
+    private final List<VariableDefinition> variableDefinitions;
 
-    public PatternRecognitionRelation(Relation input, List<Expression> partitionBy, Optional<OrderBy> orderBy, List<MeasureDefinition> measures, Optional<RowsPerMatch> rowsPerMatch, RowPatternCommon rowPatternCommon)
+    public PatternRecognitionRelation(
+            Relation input,
+            List<Expression> partitionBy,
+            Optional<OrderBy> orderBy,
+            List<MeasureDefinition> measures,
+            Optional<RowsPerMatch> rowsPerMatch,
+            Optional<SkipTo> afterMatchSkipTo,
+            Optional<PatternSearchMode> patternSearchMode,
+            RowPattern pattern,
+            List<SubsetDefinition> subsets,
+            List<VariableDefinition> variableDefinitions)
     {
-        this(Optional.empty(), input, partitionBy, orderBy, measures, rowsPerMatch, rowPatternCommon);
+        this(Optional.empty(), input, partitionBy, orderBy, measures, rowsPerMatch, afterMatchSkipTo, patternSearchMode, pattern, subsets, variableDefinitions);
     }
 
-    public PatternRecognitionRelation(NodeLocation location, Relation input, List<Expression> partitionBy, Optional<OrderBy> orderBy, List<MeasureDefinition> measures, Optional<RowsPerMatch> rowsPerMatch, RowPatternCommon rowPatternCommon)
+    public PatternRecognitionRelation(
+            NodeLocation location,
+            Relation input,
+            List<Expression> partitionBy,
+            Optional<OrderBy> orderBy,
+            List<MeasureDefinition> measures,
+            Optional<RowsPerMatch> rowsPerMatch,
+            Optional<SkipTo> afterMatchSkipTo,
+            Optional<PatternSearchMode> patternSearchMode,
+            RowPattern pattern,
+            List<SubsetDefinition> subsets,
+            List<VariableDefinition> variableDefinitions)
     {
-        this(Optional.of(location), input, partitionBy, orderBy, measures, rowsPerMatch, rowPatternCommon);
+        this(Optional.of(location), input, partitionBy, orderBy, measures, rowsPerMatch, afterMatchSkipTo, patternSearchMode, pattern, subsets, variableDefinitions);
     }
 
-    private PatternRecognitionRelation(Optional<NodeLocation> location, Relation input, List<Expression> partitionBy, Optional<OrderBy> orderBy, List<MeasureDefinition> measures, Optional<RowsPerMatch> rowsPerMatch, RowPatternCommon rowPatternCommon)
+    private PatternRecognitionRelation(
+            Optional<NodeLocation> location,
+            Relation input,
+            List<Expression> partitionBy,
+            Optional<OrderBy> orderBy,
+            List<MeasureDefinition> measures,
+            Optional<RowsPerMatch> rowsPerMatch,
+            Optional<SkipTo> afterMatchSkipTo,
+            Optional<PatternSearchMode> patternSearchMode,
+            RowPattern pattern,
+            List<SubsetDefinition> subsets,
+            List<VariableDefinition> variableDefinitions)
     {
         super(location);
         this.input = requireNonNull(input, "input is null");
@@ -50,7 +87,13 @@ public class PatternRecognitionRelation
         this.orderBy = requireNonNull(orderBy, "orderBy is null");
         this.measures = requireNonNull(measures, "measures is null");
         this.rowsPerMatch = requireNonNull(rowsPerMatch, "rowsPerMatch is null");
-        this.rowPatternCommon = requireNonNull(rowPatternCommon, "rowPatternCommon is null");
+        this.afterMatchSkipTo = requireNonNull(afterMatchSkipTo, "afterMatchSkipTo is null");
+        this.patternSearchMode = requireNonNull(patternSearchMode, "patternSearchMode is null");
+        this.pattern = requireNonNull(pattern, "pattern is null");
+        this.subsets = requireNonNull(subsets, "subsets is null");
+        requireNonNull(variableDefinitions, "variableDefinitions is null");
+        checkArgument(!variableDefinitions.isEmpty(), "variableDefinitions is empty");
+        this.variableDefinitions = variableDefinitions;
     }
 
     public Relation getInput()
@@ -78,9 +121,29 @@ public class PatternRecognitionRelation
         return rowsPerMatch;
     }
 
-    public RowPatternCommon getRowPatternCommon()
+    public Optional<SkipTo> getAfterMatchSkipTo()
     {
-        return rowPatternCommon;
+        return afterMatchSkipTo;
+    }
+
+    public Optional<PatternSearchMode> getPatternSearchMode()
+    {
+        return patternSearchMode;
+    }
+
+    public RowPattern getPattern()
+    {
+        return pattern;
+    }
+
+    public List<SubsetDefinition> getSubsets()
+    {
+        return subsets;
+    }
+
+    public List<VariableDefinition> getVariableDefinitions()
+    {
+        return variableDefinitions;
     }
 
     @Override
@@ -97,7 +160,11 @@ public class PatternRecognitionRelation
         builder.addAll(partitionBy);
         orderBy.ifPresent(builder::add);
         builder.addAll(measures);
-        builder.add(rowPatternCommon);
+        afterMatchSkipTo.ifPresent(builder::add);
+        builder.add(pattern)
+                .addAll(subsets)
+                .addAll(variableDefinitions);
+        patternSearchMode.ifPresent(builder::add);
 
         return builder.build();
     }
@@ -111,7 +178,11 @@ public class PatternRecognitionRelation
                 .add("orderBy", orderBy.orElse(null))
                 .add("measures", measures)
                 .add("rowsPerMatch", rowsPerMatch.orElse(null))
-                .add("rowPatternCommon", rowPatternCommon)
+                .add("afterMatchSkipTo", afterMatchSkipTo)
+                .add("patternSearchMode", patternSearchMode.orElse(null))
+                .add("pattern", pattern)
+                .add("subsets", subsets)
+                .add("variableDefinitions", variableDefinitions)
                 .omitNullValues()
                 .toString();
     }
@@ -132,13 +203,17 @@ public class PatternRecognitionRelation
                 Objects.equals(orderBy, that.orderBy) &&
                 Objects.equals(measures, that.measures) &&
                 Objects.equals(rowsPerMatch, that.rowsPerMatch) &&
-                Objects.equals(rowPatternCommon, that.rowPatternCommon);
+                Objects.equals(afterMatchSkipTo, that.afterMatchSkipTo) &&
+                Objects.equals(patternSearchMode, that.patternSearchMode) &&
+                Objects.equals(pattern, that.pattern) &&
+                Objects.equals(subsets, that.subsets) &&
+                Objects.equals(variableDefinitions, that.variableDefinitions);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(input, partitionBy, orderBy, measures, rowsPerMatch, rowPatternCommon);
+        return Objects.hash(input, partitionBy, orderBy, measures, rowsPerMatch, afterMatchSkipTo, patternSearchMode, pattern, subsets, variableDefinitions);
     }
 
     @Override

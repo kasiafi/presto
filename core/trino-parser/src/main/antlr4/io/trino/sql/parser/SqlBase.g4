@@ -304,7 +304,11 @@ patternRecognitionRelation
         (ORDER BY sortItem (',' sortItem)*)?
         (MEASURES measureDefinition (',' measureDefinition)*)?
         rowsPerMatch?
-        rowPatternCommon
+        (AFTER MATCH skipTo)?
+        (INITIAL | SEEK)?
+        PATTERN '(' rowPattern ')'
+        (SUBSET subsetDefinition (',' subsetDefinition)*)?
+        DEFINE variableDefinition (',' variableDefinition)*
       ')' (AS? identifier columnAliases?)?
     ;
 
@@ -321,14 +325,6 @@ emptyMatchHandling
     : SHOW EMPTY MATCHES
     | OMIT EMPTY MATCHES
     | WITH UNMATCHED ROWS
-    ;
-
-rowPatternCommon
-    : (AFTER MATCH skipTo)?
-      (INITIAL | SEEK)?
-      PATTERN '(' rowPattern ')'
-      (SUBSET subsetDefinition (',' subsetDefinition)*)?
-      DEFINE variableDefinition (',' variableDefinition)*
     ;
 
 skipTo

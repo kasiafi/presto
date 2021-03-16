@@ -168,7 +168,6 @@ import io.trino.sql.tree.Rollup;
 import io.trino.sql.tree.Row;
 import io.trino.sql.tree.RowDataType;
 import io.trino.sql.tree.RowPattern;
-import io.trino.sql.tree.RowPatternCommon;
 import io.trino.sql.tree.SampledRelation;
 import io.trino.sql.tree.SearchedCaseExpression;
 import io.trino.sql.tree.Select;
@@ -1469,6 +1468,14 @@ class AstBuilder
             orderBy = Optional.of(new OrderBy(getLocation(context.ORDER()), visit(context.sortItem(), SortItem.class)));
         }
 
+        Optional<PatternSearchMode> searchMode = Optional.empty();
+        if (context.INITIAL() != null) {
+            searchMode = Optional.of(new PatternSearchMode(getLocation(context.INITIAL()), INITIAL));
+        }
+        else if (context.SEEK() != null) {
+            searchMode = Optional.of(new PatternSearchMode(getLocation(context.SEEK()), SEEK));
+        }
+
         PatternRecognitionRelation patternRecognitionRelation = new PatternRecognitionRelation(
                 getLocation(context),
                 child,
@@ -1476,7 +1483,11 @@ class AstBuilder
                 orderBy,
                 visit(context.measureDefinition(), MeasureDefinition.class),
                 getRowsPerMatch(context.rowsPerMatch()),
-                (RowPatternCommon) visit(context.rowPatternCommon()));
+                visitIfPresent(context.skipTo(), SkipTo.class),
+                searchMode,
+                (RowPattern) visit(context.rowPattern()),
+                visit(context.subsetDefinition(), SubsetDefinition.class),
+                visit(context.variableDefinition(), VariableDefinition.class));
 
         if (context.identifier() == null) {
             return patternRecognitionRelation;
@@ -1519,26 +1530,6 @@ class AstBuilder
         }
 
         return Optional.of(ALL_WITH_UNMATCHED);
-    }
-
-    @Override
-    public Node visitRowPatternCommon(SqlBaseParser.RowPatternCommonContext context)
-    {
-        Optional<PatternSearchMode> searchMode = Optional.empty();
-        if (context.INITIAL() != null) {
-            searchMode = Optional.of(new PatternSearchMode(getLocation(context.INITIAL()), INITIAL));
-        }
-        else if (context.SEEK() != null) {
-            searchMode = Optional.of(new PatternSearchMode(getLocation(context.SEEK()), SEEK));
-        }
-
-        return new RowPatternCommon(
-                getLocation(context),
-                visitIfPresent(context.skipTo(), SkipTo.class),
-                searchMode,
-                (RowPattern) visit(context.rowPattern()),
-                visit(context.subsetDefinition(), SubsetDefinition.class),
-                visit(context.variableDefinition(), VariableDefinition.class));
     }
 
     @Override

@@ -1550,14 +1550,14 @@ class StatementAnalyzer
             }
 
             // extract label names (Identifiers) from PATTERN, SUBSET and DEFINE clauses
-            List<Identifier> patternLabelNames = extractExpressions(ImmutableList.of(relation.getRowPatternCommon().getPattern()), Identifier.class);
-            List<Identifier> subsetLabelNames = relation.getRowPatternCommon().getSubsets().stream()
+            List<Identifier> patternLabelNames = extractExpressions(ImmutableList.of(relation.getPattern()), Identifier.class);
+            List<Identifier> subsetLabelNames = relation.getSubsets().stream()
                     .map(SubsetDefinition::getName)
                     .collect(toImmutableList());
-            List<Identifier> subsetElementNames = relation.getRowPatternCommon().getSubsets().stream()
+            List<Identifier> subsetElementNames = relation.getSubsets().stream()
                     .flatMap(subset -> subset.getIdentifiers().stream())
                     .collect(toImmutableList());
-            List<Identifier> defineLabelNames = relation.getRowPatternCommon().getVariableDefinitions().stream()
+            List<Identifier> defineLabelNames = relation.getVariableDefinitions().stream()
                     .map(VariableDefinition::getName)
                     .collect(toImmutableList());
 
@@ -1576,7 +1576,7 @@ class StatementAnalyzer
 
             // analyze SUBSET
             Set<Label> unique = new HashSet<>();
-            for (SubsetDefinition subset : relation.getRowPatternCommon().getSubsets()) {
+            for (SubsetDefinition subset : relation.getSubsets()) {
                 Label label = Label.from(subset.getName());
                 if (primaryLabels.contains(label)) {
                     throw semanticException(INVALID_LABEL, subset.getName(), "union pattern variable name: %s is a duplicate of primary pattern variable name", subset.getName());
@@ -1594,7 +1594,7 @@ class StatementAnalyzer
 
             // analyze DEFINE
             unique = new HashSet<>();
-            for (VariableDefinition definition : relation.getRowPatternCommon().getVariableDefinitions()) {
+            for (VariableDefinition definition : relation.getVariableDefinitions()) {
                 Label label = Label.from(definition.getName());
                 if (!primaryLabels.contains(label)) {
                     throw semanticException(INVALID_LABEL, definition.getName(), "defined variable: %s is not a primary pattern variable", definition.getName());
@@ -1618,7 +1618,7 @@ class StatementAnalyzer
                     .addAll(primaryLabels)
                     .addAll(unionLabels)
                     .build();
-            for (VariableDefinition variableDefinition : relation.getRowPatternCommon().getVariableDefinitions()) {
+            for (VariableDefinition variableDefinition : relation.getVariableDefinitions()) {
                 Expression expression = variableDefinition.getExpression();
                 // DEFINE clause only supports RUNNING semantics which is default
                 extractExpressions(ImmutableList.of(expression), FunctionCall.class).stream()
@@ -1644,12 +1644,12 @@ class StatementAnalyzer
             Map<NodeRef<Node>, Type> measureTypes = measureTypesBuilder.build();
 
             // INITIAL or SEEK modifier is not supported in MATCH_RECOGNIZE clause
-            relation.getRowPatternCommon().getPatternSearchMode().ifPresent(mode -> {
+            relation.getPatternSearchMode().ifPresent(mode -> {
                 throw semanticException(NOT_SUPPORTED, mode, "Pattern search modifier: %s is not allowed in MATCH_RECOGNIZE clause", mode.getMode());
             });
 
             // validate pattern quantifiers
-            preOrder(relation.getRowPatternCommon().getPattern())
+            preOrder(relation.getPattern())
                     .filter(BoundedQuantifier.class::isInstance)
                     .map(BoundedQuantifier.class::cast)
                     .forEach(quantifier -> {
@@ -1682,7 +1682,7 @@ class StatementAnalyzer
             // validate pattern exclusions
             // exclusion syntax is not allowed in row pattern if ALL ROWS PER MATCH WITH UNMATCHED ROWS is specified
             if (relation.getRowsPerMatch().isPresent() && relation.getRowsPerMatch().get().isUnmatchedRows()) {
-                preOrder(relation.getRowPatternCommon().getPattern())
+                preOrder(relation.getPattern())
                         .filter(ExcludedPattern.class::isInstance)
                         .findFirst()
                         .ifPresent(exclusion -> {
@@ -1691,7 +1691,7 @@ class StatementAnalyzer
             }
 
             // validate AFTER MATCH SKIP
-            relation.getRowPatternCommon().getAfterMatchSkipTo()
+            relation.getAfterMatchSkipTo()
                     .flatMap(SkipTo::getIdentifier)
                     .ifPresent(identifier -> {
                         Optional<Label> label = Label.tryCreateFrom(identifier);
@@ -1707,7 +1707,7 @@ class StatementAnalyzer
             List<Expression> expressions = Streams.concat(
                     relation.getMeasures().stream()
                             .map(MeasureDefinition::getExpression),
-                    relation.getRowPatternCommon().getVariableDefinitions().stream()
+                    relation.getVariableDefinitions().stream()
                             .map(VariableDefinition::getExpression))
                     .collect(toImmutableList());
             expressions.forEach(expression -> preOrder(expression)

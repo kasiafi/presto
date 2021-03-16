@@ -409,11 +409,11 @@ class RelationPlanner
                 }
                 return super.rewriteQuantifiedPattern(node, context, treeRewriter);
             }
-        }, node.getRowPatternCommon().getPattern());
+        }, node.getPattern());
 
         // rewrite subsets
         ImmutableMap.Builder<Label, Set<Label>> subsets = ImmutableMap.builder();
-        for (SubsetDefinition subsetDefinition : node.getRowPatternCommon().getSubsets()) {
+        for (SubsetDefinition subsetDefinition : node.getSubsets()) {
             Label label = Label.from(subsetDefinition.getName());
             Set<Label> elements = subsetDefinition.getIdentifiers().stream()
                     .map(Label::from)
@@ -423,7 +423,7 @@ class RelationPlanner
 
         // rewrite variable definitions
         ImmutableMap.Builder<Label, Expression> variableDefinitions = ImmutableMap.builder();
-        for (VariableDefinition variableDefinition : node.getRowPatternCommon().getVariableDefinitions()) {
+        for (VariableDefinition variableDefinition : node.getVariableDefinitions()) {
             Label label = Label.from(variableDefinition.getName());
             Expression expression = planBuilder.rewrite(variableDefinition.getExpression());
             variableDefinitions.put(label, expression);
@@ -439,9 +439,9 @@ class RelationPlanner
                 measures.build(),
                 Optional.empty(),
                 node.getRowsPerMatch().orElse(ONE),
-                node.getRowPatternCommon().getAfterMatchSkipTo().flatMap(SkipTo::getIdentifier).map(Label::from),
-                node.getRowPatternCommon().getAfterMatchSkipTo().map(SkipTo::getPosition).orElse(PAST_LAST),
-                node.getRowPatternCommon().getPatternSearchMode().map(mode -> mode.getMode() == INITIAL).orElse(TRUE),
+                node.getAfterMatchSkipTo().flatMap(SkipTo::getIdentifier).map(Label::from),
+                node.getAfterMatchSkipTo().map(SkipTo::getPosition).orElse(PAST_LAST),
+                node.getPatternSearchMode().map(mode -> mode.getMode() == INITIAL).orElse(TRUE),
                 pattern,
                 subsets.build(),
                 variableDefinitions.build());
