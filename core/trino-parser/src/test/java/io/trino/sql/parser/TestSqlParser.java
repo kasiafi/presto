@@ -664,20 +664,33 @@ public class TestSqlParser
         assertRowPattern(
                 "(A B)* | CC+? DD?? E | (F | G)",
                 new PatternAlternation(ImmutableList.of(
-                        new QuantifiedPattern(
-                                new GroupedPattern(
+                        new PatternAlternation(ImmutableList.of(
+                                new QuantifiedPattern(
+                                        new GroupedPattern(
+                                                new PatternConcatenation(ImmutableList.of(
+                                                        new PatternVariable(identifier("A")),
+                                                        new PatternVariable(identifier("B"))))),
+                                        new ZeroOrMoreQuantifier(true)),
+                                new PatternConcatenation(ImmutableList.of(
                                         new PatternConcatenation(ImmutableList.of(
-                                                new PatternVariable(identifier("A")),
-                                                new PatternVariable(identifier("B"))))),
-                                new ZeroOrMoreQuantifier(true)),
-                        new PatternConcatenation(ImmutableList.of(
-                                new QuantifiedPattern(new PatternVariable(identifier("CC")), new OneOrMoreQuantifier(false)),
-                                new QuantifiedPattern(new PatternVariable(identifier("DD")), new ZeroOrOneQuantifier(false)),
-                                new PatternVariable(identifier("E")))),
+                                                new QuantifiedPattern(new PatternVariable(identifier("CC")), new OneOrMoreQuantifier(false)),
+                                                new QuantifiedPattern(new PatternVariable(identifier("DD")), new ZeroOrOneQuantifier(false)))),
+                                        new PatternVariable(identifier("E")))))),
                         new GroupedPattern(
                                 new PatternAlternation(ImmutableList.of(
                                         new PatternVariable(identifier("F")),
                                         new PatternVariable(identifier("G"))))))));
+
+        assertRowPattern("A | B | C D E F",
+                new PatternAlternation(ImmutableList.of(
+                        new PatternAlternation(ImmutableList.of(new PatternVariable(identifier("A")), new PatternVariable(identifier("B")))),
+                        new PatternConcatenation(ImmutableList.of(
+                                new PatternConcatenation(ImmutableList.of(
+                                        new PatternConcatenation(ImmutableList.of(
+                                                new PatternVariable(identifier("C")),
+                                                new PatternVariable(identifier("D")))),
+                                        new PatternVariable(identifier("E")))),
+                                new PatternVariable(identifier("F")))))));
 
         assertInvalidRowPattern("A!", "mismatched input '!'.*");
         assertInvalidRowPattern("A**", "mismatched input '*'.*");

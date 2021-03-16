@@ -298,7 +298,7 @@ class AstBuilder
     @Override
     public Node visitStandaloneRowPattern(SqlBaseParser.StandaloneRowPatternContext context)
     {
-        return visit(context.patternAlternation());
+        return visit(context.rowPattern());
     }
 
     // ******************* statements **********************
@@ -1536,7 +1536,7 @@ class AstBuilder
                 getLocation(context),
                 visitIfPresent(context.skipTo(), SkipTo.class),
                 searchMode,
-                (RowPattern) visit(context.patternAlternation()),
+                (RowPattern) visit(context.rowPattern()),
                 visit(context.subsetDefinition(), SubsetDefinition.class),
                 visit(context.variableDefinition(), VariableDefinition.class));
     }
@@ -2217,21 +2217,15 @@ class AstBuilder
     @Override
     public Node visitPatternAlternation(SqlBaseParser.PatternAlternationContext context)
     {
-        List<RowPattern> parts = visit(context.patternConcatenation(), RowPattern.class);
-        if (parts.size() > 1) {
-            return new PatternAlternation(getLocation(context), parts);
-        }
-        return parts.get(0);
+        List<RowPattern> parts = visit(context.rowPattern(), RowPattern.class);
+        return new PatternAlternation(getLocation(context), parts);
     }
 
     @Override
     public Node visitPatternConcatenation(SqlBaseParser.PatternConcatenationContext context)
     {
-        List<RowPattern> parts = visit(context.quantifiedPrimary(), RowPattern.class);
-        if (parts.size() > 1) {
-            return new PatternConcatenation(getLocation(context), parts);
-        }
-        return parts.get(0);
+        List<RowPattern> parts = visit(context.rowPattern(), RowPattern.class);
+        return new PatternConcatenation(getLocation(context), parts);
     }
 
     @Override
@@ -2259,13 +2253,13 @@ class AstBuilder
     @Override
     public Node visitPatternPermutation(SqlBaseParser.PatternPermutationContext context)
     {
-        return new PatternPermutation(getLocation(context), visit(context.patternAlternation(), RowPattern.class));
+        return new PatternPermutation(getLocation(context), visit(context.rowPattern(), RowPattern.class));
     }
 
     @Override
     public Node visitGroupedPattern(SqlBaseParser.GroupedPatternContext context)
     {
-        return new GroupedPattern(getLocation(context), (RowPattern) visit(context.patternAlternation()));
+        return new GroupedPattern(getLocation(context), (RowPattern) visit(context.rowPattern()));
     }
 
     @Override
@@ -2283,34 +2277,46 @@ class AstBuilder
     @Override
     public Node visitExcludedPattern(SqlBaseParser.ExcludedPatternContext context)
     {
-        return new ExcludedPattern(getLocation(context), (RowPattern) visit(context.patternAlternation()));
+        return new ExcludedPattern(getLocation(context), (RowPattern) visit(context.rowPattern()));
     }
 
     @Override
-    public Node visitPatternQuantifier(SqlBaseParser.PatternQuantifierContext context)
+    public Node visitZeroOrMoreQuantifier(SqlBaseParser.ZeroOrMoreQuantifierContext context)
     {
-        boolean greedy = context.QUESTION_MARK() == null;
-        if (context.quantifier().ASTERISK() != null) {
-            return new ZeroOrMoreQuantifier(getLocation(context), greedy);
-        }
-        if (context.quantifier().PLUS() != null) {
-            return new OneOrMoreQuantifier(getLocation(context), greedy);
-        }
-        if (context.quantifier().QUESTION_MARK() != null) {
-            return new ZeroOrOneQuantifier(getLocation(context), greedy);
-        }
+        boolean greedy = context.reluctant == null;
+        return new ZeroOrMoreQuantifier(getLocation(context), greedy);
+    }
+
+    @Override
+    public Node visitOneOrMoreQuantifier(SqlBaseParser.OneOrMoreQuantifierContext context)
+    {
+        boolean greedy = context.reluctant == null;
+        return new OneOrMoreQuantifier(getLocation(context), greedy);
+    }
+
+    @Override
+    public Node visitZeroOrOneQuantifier(SqlBaseParser.ZeroOrOneQuantifierContext context)
+    {
+        boolean greedy = context.reluctant == null;
+        return new ZeroOrOneQuantifier(getLocation(context), greedy);
+    }
+
+    @Override
+    public Node visitBoundedQuantifier(SqlBaseParser.BoundedQuantifierContext context)
+    {
+        boolean greedy = context.reluctant == null;
 
         Optional<LongLiteral> atLeast = Optional.empty();
         Optional<LongLiteral> atMost = Optional.empty();
-        if (context.quantifier().exactly != null) {
-            atLeast = Optional.of(new LongLiteral(getLocation(context.quantifier().exactly), context.quantifier().exactly.getText()));
-            atMost = Optional.of(new LongLiteral(getLocation(context.quantifier().exactly), context.quantifier().exactly.getText()));
+        if (context.exactly != null) {
+            atLeast = Optional.of(new LongLiteral(getLocation(context.exactly), context.exactly.getText()));
+            atMost = Optional.of(new LongLiteral(getLocation(context.exactly), context.exactly.getText()));
         }
-        if (context.quantifier().atLeast != null) {
-            atLeast = Optional.of(new LongLiteral(getLocation(context.quantifier().atLeast), context.quantifier().atLeast.getText()));
+        if (context.atLeast != null) {
+            atLeast = Optional.of(new LongLiteral(getLocation(context.atLeast), context.atLeast.getText()));
         }
-        if (context.quantifier().atMost != null) {
-            atMost = Optional.of(new LongLiteral(getLocation(context.quantifier().atMost), context.quantifier().atMost.getText()));
+        if (context.atMost != null) {
+            atMost = Optional.of(new LongLiteral(getLocation(context.atMost), context.atMost.getText()));
         }
         return new BoundedQuantifier(getLocation(context), greedy, atLeast, atMost);
     }

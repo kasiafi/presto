@@ -35,7 +35,7 @@ standaloneType
     ;
 
 standaloneRowPattern
-    : patternAlternation EOF
+    : rowPattern EOF
     ;
 
 statement
@@ -330,7 +330,7 @@ emptyMatchHandling
 rowPatternCommon
     : (AFTER MATCH skipTo)?
       (INITIAL | SEEK)?
-      PATTERN '(' patternAlternation ')'
+      PATTERN '(' rowPattern ')'
       (SUBSET subsetDefinition (',' subsetDefinition)*)?
       DEFINE variableDefinition (',' variableDefinition)*
     ;
@@ -546,41 +546,28 @@ frameBound
     | expression boundType=(PRECEDING | FOLLOWING)  #boundedFrame
     ;
 
-patternAlternation
-    : patternConcatenation ('|' patternConcatenation)*
-    ;
-
-patternConcatenation
-    : quantifiedPrimary (quantifiedPrimary)*
-    ;
-
-quantifiedPrimary
-    : patternPrimary (patternQuantifier)?
+rowPattern
+    : patternPrimary patternQuantifier?                 #quantifiedPrimary
+    | rowPattern rowPattern                             #patternConcatenation
+    | rowPattern '|' rowPattern                         #patternAlternation
     ;
 
 patternPrimary
-    :  identifier                                                   #patternVariable
-    | '(' ')'                                                       #emptyPattern
-    | PERMUTE '(' patternAlternation (',' patternAlternation)* ')'  #patternPermutation
-    | '(' patternAlternation ')'                                    #groupedPattern
-    | '^'                                                           #partitionStartAnchor
-    | '$'                                                           #partitionEndAnchor
-    | '{-' patternAlternation '-}'                                  #excludedPattern
+    : identifier                                        #patternVariable
+    | '(' ')'                                           #emptyPattern
+    | PERMUTE '(' rowPattern (',' rowPattern)* ')'      #patternPermutation
+    | '(' rowPattern ')'                                #groupedPattern
+    | '^'                                               #partitionStartAnchor
+    | '$'                                               #partitionEndAnchor
+    | '{-' rowPattern '-}'                              #excludedPattern
     ;
 
 patternQuantifier
-    : quantifier (QUESTION_MARK)?
-    ;
-
-quantifier
-    : ASTERISK
-    | PLUS
-    | QUESTION_MARK
-    | '{' ',' '}'
-    | '{' exactly=INTEGER_VALUE '}'
-    | '{' atLeast=INTEGER_VALUE ',' '}'
-    | '{' atLeast=INTEGER_VALUE ',' atMost=INTEGER_VALUE '}'
-    | '{' ',' atMost=INTEGER_VALUE '}'
+    : ASTERISK (reluctant=QUESTION_MARK)?                                                       #zeroOrMoreQuantifier
+    | PLUS (reluctant=QUESTION_MARK)?                                                           #oneOrMoreQuantifier
+    | QUESTION_MARK (reluctant=QUESTION_MARK)?                                                  #zeroOrOneQuantifier
+    | '{' exactly=INTEGER_VALUE '}' (reluctant=QUESTION_MARK)?                                  #boundedQuantifier
+    | '{' (atLeast=INTEGER_VALUE)? ',' (atMost=INTEGER_VALUE)? '}' (reluctant=QUESTION_MARK)?   #boundedQuantifier
     ;
 
 updateAssignment
